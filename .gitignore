@@ -1,0 +1,47 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Test binary
+*.test
+
+# Go workspace
+go.work
+
+# Secrets & config (contains API keys)
+config.yaml
+
+# Data
+data/
+
+# Uploaded files
+images/
+*.png
+*.jpg
+*.jpeg
+
+# Test documents
+test_docs/
+
+# Python venv (milvus-service)
+.venv/
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Claude Code
+.claude/
