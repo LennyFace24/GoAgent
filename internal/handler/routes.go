@@ -8,6 +8,7 @@ import (
 
 
 var (
+	chatHandler       *ChatHandler
 	chatStreamHandler *ChatStreamHandler
 	fileHandler       *FileHandler
 )
@@ -17,7 +18,11 @@ func SetupHandler(r *gin.Engine) {
 	if err != nil {
 		panic("初始化对话存储失败: " + err.Error())
 	}
-
+    chatHandler = NewChatHandler(service.NewChatService(
+		service.NewFileService(),
+		convStore,
+	))
+	
 	chatStreamHandler = NewChatStreamHandler(service.NewChatStreamService(
 		service.NewFileService(),
 		convStore,
@@ -28,6 +33,7 @@ func SetupHandler(r *gin.Engine) {
 
 func SetupRoutes(r *gin.Engine) {
 	// 设置路由
+	r.POST("/chat", chatHandler.Chat)
 	r.POST("/chat_stream", chatStreamHandler.ChatStream)
 	r.POST("/upload_file", fileHandler.UploadFile)
 	r.POST("/search", fileHandler.Search)

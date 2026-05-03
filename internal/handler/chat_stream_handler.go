@@ -60,10 +60,10 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 
 	for {
 		select {
-		case <-ctx.Done():
-			log.Println("ChatStream: 客户端断开或超时")
-			return
-		default:
+			case <-ctx.Done():
+				log.Println("ChatStream: 客户端断开或超时")
+				return
+			default:
 		}
 
 		event, ok := iter.Next()
