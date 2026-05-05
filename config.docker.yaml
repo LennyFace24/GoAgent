@@ -12,3 +12,5 @@ embedding:
     model: your-embedding-model
 prometheus:
     url: http://prometheus:9090
+chromadb:
+    url: http://chromadb:8088

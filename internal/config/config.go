@@ -32,6 +32,9 @@ type Config struct {
 	Prometheus struct {
 		URL string `yaml:"url"`
 	} `yaml:"prometheus"`
+	ChromaDB struct {
+		URL string `yaml:"url"`
+	} `yaml:"chromadb"`
 }
 
 func LoadConfig(path string) *Config {

@@ -46,13 +46,17 @@ func NewFileService() *FileService {
 	// 创建 Embedding
 	embedder, _ := openai.NewEmbedder(ctx,
 		&openai.EmbeddingConfig{
-			Model:  cfg.Embedding.Model,
-			APIKey: cfg.Embedding.ApiKey,
+			Model:   cfg.Embedding.Model,
+			APIKey:  cfg.Embedding.ApiKey,
 			BaseURL: cfg.Embedding.BaseUrl,
 		})
 
 	// 创建 ChromaDB 存储
-	chromaStore := store.NewChromaStore("http://localhost:8088")
+	chromaURL := cfg.ChromaDB.URL
+	if chromaURL == "" {
+		chromaURL = "http://localhost:8088"
+	}
+	chromaStore := store.NewChromaStore(chromaURL)
 
 	return &FileService{
 		loader:      loader,
