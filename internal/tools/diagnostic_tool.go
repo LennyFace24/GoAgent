@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -105,8 +106,8 @@ func queryPrometheus(baseURL, service string) (string, error) {
 }
 
 func instantQuery(client *http.Client, baseURL, promQL string) (string, error) {
-	url := fmt.Sprintf("%s/api/v1/query?query=%s", strings.TrimRight(baseURL, "/"), promQL)
-	resp, err := client.Get(url)
+	reqURL := fmt.Sprintf("%s/api/v1/query?query=%s", strings.TrimRight(baseURL, "/"), url.QueryEscape(promQL))
+	resp, err := client.Get(reqURL)
 	if err != nil {
 		return "", err
 	}
