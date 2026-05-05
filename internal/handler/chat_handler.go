@@ -37,7 +37,7 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	reply := h.chatService.Chat(ctx, sessionId, req.Message)
 
 	h.chatService.SaveReply(ctx, sessionId, req.Message, reply)
-	
+
 	c.JSON(200, gin.H{
 		"reply": reply,
 	})

@@ -29,6 +29,9 @@ type Config struct {
 		ApiKey  string `yaml:"api_key"`
 		Model   string `yaml:"model"`
 	} `yaml:"embedding"`
+	Prometheus struct {
+		URL string `yaml:"url"`
+	} `yaml:"prometheus"`
 }
 
 func LoadConfig(path string) *Config {

@@ -1,0 +1,40 @@
+services:
+  frontend:
+    build: ./frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+
+  backend:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.docker.yaml:/app/config.yaml:ro
+      - goagent-data:/app/data
+    depends_on:
+      - chromadb
+      - prometheus
+
+  chromadb:
+    build: ./milvus-service
+    ports:
+      - "8088:8088"
+    volumes:
+      - chroma-data:/app/chroma_data
+
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+volumes:
+  goagent-data:
+  chroma-data:
+  prometheus-data:
