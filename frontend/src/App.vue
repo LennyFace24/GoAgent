@@ -3,6 +3,57 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import ChatView from './components/ChatView.vue'
 
 const activeMode = ref('chat_stream')
+const activeConversationId = ref('default')
+
+// ---- Conversations ----
+const conversations = ref([])
+
+async function loadConversations() {
+  try {
+    const res = await fetch('/conversations')
+    if (!res.ok) return
+    const data = await res.json()
+    conversations.value = data.conversations || []
+    // 如果没有对话，自动创建一个
+    if (conversations.value.length === 0) {
+      await createConversation()
+    } else if (!conversations.value.find(c => c.id === activeConversationId.value)) {
+      activeConversationId.value = conversations.value[0].id
+    }
+  } catch { /* ignore */ }
+}
+
+async function createConversation() {
+  try {
+    const res = await fetch('/conversation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: '新对话' }),
+    })
+    if (!res.ok) return
+    const data = await res.json()
+    if (data.conversation) {
+      conversations.value.unshift(data.conversation)
+      activeConversationId.value = data.conversation.id
+    }
+  } catch { /* ignore */ }
+}
+
+function selectConversation(id) {
+  activeConversationId.value = id
+}
+
+async function deleteConversation(id) {
+  try {
+    await fetch(`/conversation/${id}`, { method: 'DELETE' })
+    conversations.value = conversations.value.filter(c => c.id !== id)
+    if (activeConversationId.value === id) {
+      activeConversationId.value = conversations.value.length > 0 ? conversations.value[0].id : 'default'
+    }
+  } catch { /* ignore */ }
+}
+
+onMounted(() => { loadConversations() })
 
 // ---- Sidebar resize ----
 const SIDEBAR_DEFAULT = 260
@@ -115,6 +166,21 @@ async function doSearch() {
       <div class="sidebar-inner">
         <div class="sidebar-brand">GoAgent</div>
 
+        <!-- Conversations -->
+        <div class="sidebar-section">
+          <button class="new-chat-btn" @click="createConversation">+ 新对话</button>
+          <div class="conv-list">
+            <div
+              v-for="conv in conversations" :key="conv.id"
+              :class="['conv-item', { active: activeConversationId === conv.id }]"
+              @click="selectConversation(conv.id)"
+            >
+              <span class="conv-title">{{ conv.title || '新对话' }}</span>
+              <button class="conv-del" @click.stop="deleteConversation(conv.id)" title="删除">&times;</button>
+            </div>
+          </div>
+        </div>
+
         <!-- File tools -->
         <div class="sidebar-section">
           <div class="section-title">文件</div>
@@ -157,7 +223,7 @@ async function doSearch() {
     </button>
 
     <!-- Main chat area -->
-    <ChatView v-model:mode="activeMode" />
+    <ChatView v-model:mode="activeMode" :conversationId="activeConversationId" @conversationCreated="loadConversations" />
   </div>
 </template>
 
@@ -285,6 +351,32 @@ body {
   margin-top: auto; font-size: 0.7rem; color: var(--text-muted);
   text-align: center; padding-top: 12px; white-space: nowrap;
 }
+
+.new-chat-btn {
+  width: 100%; background: var(--accent-dim); border: 1px solid var(--accent);
+  color: var(--accent-light); padding: 7px 14px; border-radius: 8px;
+  font-size: 0.8rem; cursor: pointer; margin-bottom: 10px;
+  transition: background 0.12s;
+}
+.new-chat-btn:hover { background: var(--accent); color: #fff; }
+
+.conv-list { max-height: 240px; overflow-y: auto; }
+.conv-item {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 7px 10px; border-radius: 6px; cursor: pointer;
+  font-size: 0.78rem; color: var(--text-secondary);
+  transition: background 0.12s; margin-bottom: 2px;
+}
+.conv-item:hover { background: var(--bg-hover); }
+.conv-item.active { background: var(--bg-active); color: var(--accent); }
+.conv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.conv-del {
+  background: none; border: none; color: var(--text-muted); cursor: pointer;
+  font-size: 1rem; padding: 0 4px; line-height: 1; opacity: 0;
+  transition: opacity 0.12s, color 0.12s;
+}
+.conv-item:hover .conv-del { opacity: 1; }
+.conv-del:hover { color: var(--text-error); }
 
 /* ---- Drag handle ---- */
 .drag-handle {

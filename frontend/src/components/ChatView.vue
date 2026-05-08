@@ -1,12 +1,13 @@
 <script setup>
-import { ref, nextTick, onMounted } from 'vue'
+import { ref, nextTick, onMounted, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
 const props = defineProps({
   mode: { type: String, required: true },
+  conversationId: { type: String, default: 'default' },
 })
-const emit = defineEmits(['update:mode'])
+const emit = defineEmits(['update:mode', 'conversationCreated'])
 
 const modes = [
   { key: 'chat_stream', label: 'Chat Stream' },
@@ -71,7 +72,7 @@ async function sendNonStream(text) {
     const res = await fetch('/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text }),
+      body: JSON.stringify({ message: text, conversation_id: props.conversationId }),
     })
     if (!res.ok) {
       addMsg('error', `HTTP ${res.status}: ${await res.text()}`)
@@ -100,7 +101,7 @@ async function sendSSE(text) {
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text }),
+      body: JSON.stringify({ message: text, conversation_id: props.conversationId }),
     })
 
     if (!res.ok) {
@@ -158,12 +159,13 @@ const placeholders = {
   ai_ops: '描述故障现象，如：API 响应时间从 200ms 飙升到 3s，错误率 12%',
 }
 
-onMounted(async () => {
+async function loadHistory() {
+  messages.value = []
   try {
-    const res = await fetch('/history')
+    const res = await fetch(`/conversation/${props.conversationId}`)
     if (!res.ok) return
-    const lines = await res.json()
-    if (!Array.isArray(lines)) return
+    const data = await res.json()
+    const lines = data.messages || []
     for (const line of lines) {
       if (line.role === 'user' || line.role === 'assistant') {
         messages.value.push({
@@ -175,8 +177,11 @@ onMounted(async () => {
       }
     }
     scrollBottom()
-  } catch { /* 忽略加载失败 */ }
-})
+  } catch { /* ignore */ }
+}
+
+onMounted(() => { loadHistory() })
+watch(() => props.conversationId, () => { loadHistory() })
 </script>
 
 <template>
