@@ -24,11 +24,6 @@ func NewToolHandler(fileSearcher FileSearcher) (*ToolHandler, error) {
 		return nil, fmt.Errorf("创建 health_check 工具失败: %w", err)
 	}
 
-	logAnalyzerTool, err := NewLogAnalyzerTool()
-	if err != nil {
-		return nil, fmt.Errorf("创建 log_analyzer 工具失败: %w", err)
-	}
-
 	knowledgeTool, err := NewKnowledgeSearchTool(fileSearcher)
 	if err != nil {
 		return nil, fmt.Errorf("创建 knowledge_search 工具失败: %w", err)
@@ -56,7 +51,6 @@ func NewToolHandler(fileSearcher FileSearcher) (*ToolHandler, error) {
 			writeFileTool,
 			editFileTool,
 			healthCheckTool,
-			logAnalyzerTool,
 			knowledgeTool,
 		},
 	}, nil

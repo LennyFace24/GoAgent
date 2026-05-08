@@ -18,11 +18,6 @@ type HealthCheckInput struct {
 	Service string `json:"service" description:"要检查的服务名称，可选" required:"false"`
 }
 
-type LogAnalysisInput struct {
-	Service   string `json:"service" description:"服务名称" required:"true"`
-	TimeRange string `json:"time_range" description:"时间范围，如 '14:00-14:30'" required:"false"`
-	Keyword   string `json:"keyword" description:"日志关键词筛选" required:"false"`
-}
 
 type prometheusResponse struct {
 	Status string `json:"status"`
@@ -44,16 +39,6 @@ func NewHealthCheckTool(prometheusURL string) (tool.InvokableTool, error) {
 				return "Prometheus 未配置，请在 config.yaml 中设置 prometheus.url", nil
 			}
 			return queryPrometheus(prometheusURL, input.Service)
-		},
-	)
-}
-
-func NewLogAnalyzerTool() (tool.InvokableTool, error) {
-	return utils.InferTool(
-		"log_analyzer",
-		"分析指定服务的错误日志，返回错误模式、高频错误和异常事件",
-		func(ctx context.Context, input LogAnalysisInput) (string, error) {
-			return mockLogAnalysis(input.Service, input.TimeRange, input.Keyword), nil
 		},
 	)
 }
@@ -178,28 +163,3 @@ func formatNumber(s string) string {
 	return s
 }
 
-func mockLogAnalysis(service, timeRange, keyword string) string {
-	if keyword == "" {
-		keyword = "error"
-	}
-	return fmt.Sprintf(`[%s 日志分析]
-
-时间范围: %s
-关键词: %s
-
-错误分布:
-  timeout 错误: 234 条 (62%%)
-  连接拒绝: 89 条 (23%%)
-  500 内部错误: 45 条 (12%%)
-  其他: 12 条 (3%%)
-
-Top 3 错误信息:
-1. dial tcp 10.0.1.5:3306: i/o timeout (出现 189 次)
-2. connection pool exhausted, max=200, waiting=156 (出现 45 次)
-3. slow query detected: SELECT * FROM orders WHERE ... (avg 4,200ms) (出现 23 次)
-
-时间分布:
-  14:00-14:10: ████████████ 89 条
-  14:10-14:20: ████████████████████████ 156 条
-  14:20-14:30: ██████████████████ 133 条`, service, timeRange, keyword)
-}
