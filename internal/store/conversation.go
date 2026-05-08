@@ -6,9 +6,17 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/cloudwego/eino/schema"
 )
+
+type ConversationMeta struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
 
 type ConversationStore struct {
 	dir string
@@ -26,28 +34,97 @@ func NewConversationStore(dir string) (*ConversationStore, error) {
 	return &ConversationStore{dir: dir}, nil
 }
 
-func (s *ConversationStore) filePath(sessionID string) string {
-	return filepath.Join(s.dir, sessionID+".jsonl")
+func (s *ConversationStore) sessionDir(sessionID string) string {
+	return filepath.Join(s.dir, sessionID)
 }
 
-// LoadHistory 加载指定sessionID的对话历史，返回消息列表
-func (s *ConversationStore) LoadHistory(sessionID string) ([]*schema.Message, error) {
-	// 打开文件
-	f, err := os.Open(s.filePath(sessionID))
+func (s *ConversationStore) filePath(sessionID, conversationID string) string {
+	return filepath.Join(s.sessionDir(sessionID), conversationID+".jsonl")
+}
+
+func (s *ConversationStore) metaPath(sessionID, conversationID string) string {
+	return filepath.Join(s.sessionDir(sessionID), conversationID+".meta.json")
+}
+
+// CreateConversation 创建新对话，返回 conversationID
+func (s *ConversationStore) CreateConversation(sessionID, title string) (*ConversationMeta, error) {
+	if err := os.MkdirAll(s.sessionDir(sessionID), 0755); err != nil {
+		return nil, fmt.Errorf("create session dir: %w", err)
+	}
+
+	id := fmt.Sprintf("conv_%d", time.Now().UnixMilli())
+	now := time.Now().Format(time.RFC3339)
+
+	meta := &ConversationMeta{
+		ID:        id,
+		Title:     title,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.saveMeta(sessionID, meta); err != nil {
+		return nil, err
+	}
+	return meta, nil
+}
+
+// ListConversations 返回指定 session 的所有对话元数据，按更新时间倒序
+func (s *ConversationStore) ListConversations(sessionID string) ([]*ConversationMeta, error) {
+	dir := s.sessionDir(sessionID)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("read session dir: %w", err)
+	}
+
+	var metas []*ConversationMeta
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
+			continue
+		}
+		metaPath := filepath.Join(dir, entry.Name())
+		data, err := os.ReadFile(metaPath)
+		if err != nil {
+			continue
+		}
+		var meta ConversationMeta
+		if err := json.Unmarshal(data, &meta); err != nil {
+			continue
+		}
+		metas = append(metas, &meta)
+	}
+
+	// 按更新时间倒序排列
+	for i := 0; i < len(metas); i++ {
+		for j := i + 1; j < len(metas); j++ {
+			if metas[j].UpdatedAt > metas[i].UpdatedAt {
+				metas[i], metas[j] = metas[j], metas[i]
+			}
+		}
+	}
+
+	return metas, nil
+}
+
+// LoadHistory 加载指定对话的历史消息
+func (s *ConversationStore) LoadHistory(sessionID, conversationID string) ([]*schema.Message, error) {
+	f, err := os.Open(s.filePath(sessionID, conversationID))
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("open history: %w", err)
 	}
-	defer f.Close() 
-	
+	defer f.Close()
+
 	var msgs []*schema.Message
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		var line messageLine
 		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
-			continue // 跳过损坏的行
+			continue
 		}
 		switch line.Role {
 		case "user":
@@ -59,9 +136,13 @@ func (s *ConversationStore) LoadHistory(sessionID string) ([]*schema.Message, er
 	return msgs, scanner.Err()
 }
 
-// SaveMessages 将新的消息追加保存到指定sessionID的历史文件中
-func (s *ConversationStore) SaveMessages(sessionID string, msgs ...*schema.Message) error {
-	f, err := os.OpenFile(s.filePath(sessionID), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+// SaveMessages 保存消息到指定对话
+func (s *ConversationStore) SaveMessages(sessionID, conversationID string, msgs ...*schema.Message) error {
+	if err := os.MkdirAll(s.sessionDir(sessionID), 0755); err != nil {
+		return fmt.Errorf("create session dir: %w", err)
+	}
+
+	f, err := os.OpenFile(s.filePath(sessionID, conversationID), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
 		return fmt.Errorf("open history for write: %w", err)
 	}
@@ -74,5 +155,40 @@ func (s *ConversationStore) SaveMessages(sessionID string, msgs ...*schema.Messa
 			return fmt.Errorf("write message: %w", err)
 		}
 	}
+
+	// 更新 meta 的 UpdatedAt
+	meta, err := s.loadMeta(sessionID, conversationID)
+	if err == nil {
+		meta.UpdatedAt = time.Now().Format(time.RFC3339)
+		_ = s.saveMeta(sessionID, meta)
+	}
+
 	return nil
+}
+
+// DeleteConversation 删除对话及其元数据
+func (s *ConversationStore) DeleteConversation(sessionID, conversationID string) error {
+	os.Remove(s.filePath(sessionID, conversationID))
+	os.Remove(s.metaPath(sessionID, conversationID))
+	return nil
+}
+
+func (s *ConversationStore) saveMeta(sessionID string, meta *ConversationMeta) error {
+	data, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal meta: %w", err)
+	}
+	return os.WriteFile(s.metaPath(sessionID, meta.ID), data, 0644)
+}
+
+func (s *ConversationStore) loadMeta(sessionID, conversationID string) (*ConversationMeta, error) {
+	data, err := os.ReadFile(s.metaPath(sessionID, conversationID))
+	if err != nil {
+		return nil, err
+	}
+	var meta ConversationMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return nil, err
+	}
+	return &meta, nil
 }

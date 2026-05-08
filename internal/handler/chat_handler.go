@@ -22,7 +22,8 @@ func NewChatHandler(chatService *service.ChatService) *ChatHandler {
 func (h *ChatHandler) Chat(c *gin.Context) {
 	// 这里直接调用ChatService的Chat方法，返回结果
 	var req struct {
-		Message string `json:"message"`
+		Message        string `json:"message"`
+		ConversationID string `json:"conversation_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{
@@ -31,12 +32,16 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		return
 	}
 	sessionId := sessions.Default(c).Get("session_id").(string)
+	conversationID := req.ConversationID
+	if conversationID == "" {
+		conversationID = "default"
+	}
 
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
 	defer cancel()
-	reply := h.chatService.Chat(ctx, sessionId, req.Message)
+	reply := h.chatService.Chat(ctx, sessionId, conversationID, req.Message)
 
-	h.chatService.SaveReply(ctx, sessionId, req.Message, reply)
+	h.chatService.SaveReply(ctx, sessionId, conversationID, req.Message, reply)
 
 	c.JSON(200, gin.H{
 		"reply": reply,

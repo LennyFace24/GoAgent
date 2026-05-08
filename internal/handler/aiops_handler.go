@@ -21,7 +21,8 @@ func NewAIOpsHandler(s *service.AIOpsService) *AIOpsHandler {
 
 func (h *AIOpsHandler) Diagnose(c *gin.Context) {
 	var req struct {
-		Message string `json:"message"`
+		Message        string `json:"message"`
+		ConversationID string `json:"conversation_id"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -38,7 +39,11 @@ func (h *AIOpsHandler) Diagnose(c *gin.Context) {
 	defer cancel()
 
 	sessionID := sessions.Default(c).Get("session_id").(string)
-	iter, err := h.service.Diagnose(ctx, sessionID, req.Message)
+	conversationID := req.ConversationID
+	if conversationID == "" {
+		conversationID = "default"
+	}
+	iter, err := h.service.Diagnose(ctx, sessionID, conversationID, req.Message)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return

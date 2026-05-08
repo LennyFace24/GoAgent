@@ -58,8 +58,8 @@ func NewChatService(toolHandler *tools.ToolHandler, convStore *store.Conversatio
 	}
 }
 
-func (s *ChatService) Chat(ctx context.Context, sessionID string, message string) string {
-	history,err := s.store.LoadHistory(sessionID)
+func (s *ChatService) Chat(ctx context.Context, sessionID string, conversationID string, message string) string {
+	history,err := s.store.LoadHistory(sessionID, conversationID)
 	if err != nil {
 		log.Printf("ChatService: 加载历史记录失败 %v", err)
 	}
@@ -123,8 +123,8 @@ func (s *ChatService) executeTool(ctx context.Context, tc schema.ToolCall) (stri
 	return "", fmt.Errorf("tool not found: %s", tc.Function.Name)
 }
 
-func (s *ChatService) SaveReply(ctx context.Context, sessionID string, userMsg string, aiMsg string) {
-	if err := s.store.SaveMessages(sessionID,
+func (s *ChatService) SaveReply(ctx context.Context, sessionID string, conversationID string, userMsg string, aiMsg string) {
+	if err := s.store.SaveMessages(sessionID, conversationID,
 		schema.UserMessage(userMsg),
 		schema.AssistantMessage(aiMsg, nil),
 	); err != nil {

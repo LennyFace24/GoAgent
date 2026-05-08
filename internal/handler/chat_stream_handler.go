@@ -22,7 +22,8 @@ func NewChatStreamHandler(s *service.ChatStreamService) *ChatStreamHandler {
 
 func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 	var req struct {
-		Message string `json:"message"`
+		Message        string `json:"message"`
+		ConversationID string `json:"conversation_id"`
 	}
 	// 解析json
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -35,9 +36,14 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 120*time.Second)
 	defer cancel()
 
+	sessionID := sessions.Default(c).Get("session_id").(string)
+	conversationID := req.ConversationID
+	if conversationID == "" {
+		conversationID = "default"
+	}
+
 	iter, err := h.service.ChatStream(ctx,
-		sessions.Default(c).Get("session_id").(string),
-		req.Message)
+		sessionID, conversationID, req.Message)
 	if err != nil {
 		c.JSON(500, gin.H{
 			"error": err.Error(),
@@ -51,7 +57,6 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 
 	// 完整的回复内容，用于后续保存到历史记录
 	var fullReply strings.Builder
-	sessionID := sessions.Default(c).Get("session_id").(string)
 
 	defer func() {
 		c.SSEvent("done", "")
@@ -104,7 +109,7 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 	}
 
 	if fullReply.Len() > 0 {
-		h.service.SaveReply(ctx, sessionID, req.Message, fullReply.String())
+		h.service.SaveReply(ctx, sessionID, conversationID, req.Message, fullReply.String())
 	} else {
 		log.Println("ChatStream: received empty reply")
 	}

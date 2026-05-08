@@ -73,9 +73,9 @@ func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.Conve
 }
 
 func (s *ChatStreamService) ChatStream(ctx context.Context,
-	sessionID string, userMsg string) (*adk.AsyncIterator[*adk.AgentEvent], error) {
+	sessionID string, conversationID string, userMsg string) (*adk.AsyncIterator[*adk.AgentEvent], error) {
 
-	history, err := s.store.LoadHistory(sessionID)
+	history, err := s.store.LoadHistory(sessionID, conversationID)
 	if err != nil {
 		log.Printf("ChatStreamService: 加载历史失败 %v", err)
 		history = nil
@@ -193,8 +193,8 @@ func (s *ChatStreamService) executeTool(ctx context.Context, tc schema.ToolCall)
 	return "", fmt.Errorf("tool not found: %s", tc.Function.Name)
 }
 
-func (s *ChatStreamService) SaveReply(ctx context.Context, sessionID, userMsg, aiMsg string) {
-	if err := s.store.SaveMessages(sessionID,
+func (s *ChatStreamService) SaveReply(ctx context.Context, sessionID, conversationID, userMsg, aiMsg string) {
+	if err := s.store.SaveMessages(sessionID, conversationID,
 		schema.UserMessage(userMsg),
 		schema.AssistantMessage(aiMsg, nil),
 	); err != nil {

@@ -101,9 +101,9 @@ func NewAIOpsService(toolHandler *tools.ToolHandler, convStore *store.Conversati
 }
 
 func (s *AIOpsService) Diagnose(ctx context.Context,
-	sessionID string, message string) (*adk.AsyncIterator[*adk.AgentEvent], error) {
+	sessionID string, conversationID string, message string) (*adk.AsyncIterator[*adk.AgentEvent], error) {
 
-	history, err := s.store.LoadHistory(sessionID)
+	history, err := s.store.LoadHistory(sessionID, conversationID)
 	if err != nil {
 		log.Printf("AIOpsService: 加载历史失败 %v", err)
 		history = nil
