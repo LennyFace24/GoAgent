@@ -30,24 +30,17 @@ const instruction = `你是专业的智能问答助手。
 - 中文回答，简洁专业，适当分段。`
 
 type ChatStreamService struct {
-	store       *store.ConversationStore
-	fileService *FileService
-	toolModel   model.ToolCallingChatModel
-	tools       []tool.BaseTool
+	store     *store.ConversationStore
+	toolModel model.ToolCallingChatModel
+	tools     []tool.BaseTool
 }
 
-func NewChatStreamService(fileService *FileService, convStore *store.ConversationStore) *ChatStreamService {
-	knowledgeTool, err := tools.NewKnowledgeSearchTool(fileService)
-	if err != nil {
-		log.Printf("ChatStreamService: 知识检索工具创建失败 %v", err)
-		return nil
-	}
-
+func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore) *ChatStreamService {
 	maxTokens := cfg.GetConfig().Llm.MaxTokens
 	chatModel, err := openai.NewChatModel(context.Background(), &openai.ChatModelConfig{
-		Model:              cfg.GetConfig().Llm.Model,
-		APIKey:             cfg.GetConfig().Llm.ApiKey,
-		BaseURL:            cfg.GetConfig().Llm.BaseUrl,
+		Model:               cfg.GetConfig().Llm.Model,
+		APIKey:              cfg.GetConfig().Llm.ApiKey,
+		BaseURL:             cfg.GetConfig().Llm.BaseUrl,
 		MaxCompletionTokens: &maxTokens,
 	})
 	if err != nil {
@@ -55,7 +48,7 @@ func NewChatStreamService(fileService *FileService, convStore *store.Conversatio
 		return nil
 	}
 
-	tools_ := []tool.BaseTool{knowledgeTool}
+	tools_ := toolHandler.Tools()
 	toolInfos := make([]*schema.ToolInfo, len(tools_))
 	for i, t := range tools_ {
 		info, infoErr := t.Info(context.Background())
@@ -73,10 +66,9 @@ func NewChatStreamService(fileService *FileService, convStore *store.Conversatio
 	}
 
 	return &ChatStreamService{
-		store:       convStore,
-		fileService: fileService,
-		toolModel:   toolModel,
-		tools:       tools_,
+		store:     convStore,
+		toolModel: toolModel,
+		tools:     tools_,
 	}
 }
 
@@ -105,9 +97,16 @@ func (s *ChatStreamService) runConversation(
 ) {
 	defer gen.Close()
 
-	const maxTurns = 3
-	for turn := 0; turn < maxTurns; turn++ {
-		log.Printf("[Turn %d] 调用 LLM...", turn)
+	const maxTurns = 20
+
+	turn := 0
+	todo_uncalled_count := 0
+
+	for {
+		// 回合数+1
+		turn++
+		// todo工具调用提醒
+		use_todo := false
 
 		stream, err := s.toolModel.Stream(ctx, messages)
 		if err != nil {
@@ -129,27 +128,46 @@ func (s *ChatStreamService) runConversation(
 			log.Printf("[Turn %d] ToolCall[%d]: name=%s args=%s", turn, i, tc.Function.Name, tc.Function.Arguments)
 		}
 
+		// 检查是否有toolcall，没有则直接返回
 		if len(fullMsg.ToolCalls) == 0 {
 			log.Printf("[Turn %d] 无 ToolCall，返回最终回答", turn)
 			return
 		}
 
+		for _, tc := range fullMsg.ToolCalls {
+			if tc.Function.Name == "write_todo" || tc.Function.Name == "read_todo" {
+				use_todo = true
+				break
+			}
+		}
+		if !use_todo {
+			todo_uncalled_count++
+		}
 		messages = append(messages, fullMsg)
+
+		needReminder := !use_todo && todo_uncalled_count >= 5
+		if needReminder {
+			todo_uncalled_count = 0
+		}
+
 		for _, tc := range fullMsg.ToolCalls {
 			result, toolErr := s.executeTool(ctx, tc)
 			if toolErr != nil {
-				gen.Send(&adk.AgentEvent{Err: toolErr})
-				return
+				result = fmt.Sprintf("工具执行失败: %v", toolErr)
 			}
-			log.Printf("[Turn %d] 工具 %s 返回 %d 字符", turn, tc.Function.Name, len(result))
+			if needReminder {
+				result = result + "\n\n[系统提醒] 你已经连续多轮未更新待办事项，请立即调用 read_todo 和 write_todo 更新当前任务进度。"
+				needReminder = false
+			}
 			msg := schema.ToolMessage(result, tc.ID, schema.WithToolName(tc.Function.Name))
 			messages = append(messages, msg)
 		}
 
+		// 达到最大轮次仍未回答，强制最后一轮
+		if turn >= maxTurns {
+			break
+		}
 	}
-
-	// 达到最大轮次仍未回答，强制最后一轮
-	log.Printf("[Fallback] 模型 %d 轮均调用工具，强制要求回答", maxTurns)
 	messages = append(messages, schema.UserMessage("你已调用足够多次工具，现在必须直接回答用户的问题。不要再调用任何工具。"))
 	stream, err := s.toolModel.Stream(ctx, messages)
 	if err != nil {
@@ -157,8 +175,8 @@ func (s *ChatStreamService) runConversation(
 		return
 	}
 	gen.Send(adk.EventFromMessage(nil, stream, schema.Assistant, ""))
-}
 
+}
 
 func (s *ChatStreamService) executeTool(ctx context.Context, tc schema.ToolCall) (string, error) {
 	for _, t := range s.tools {

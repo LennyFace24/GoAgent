@@ -64,7 +64,8 @@ type metricQuery struct {
 	unit  string
 }
 
-func queryPrometheus(baseURL, service string) (string, error) {
+// health check tool
+func queryPrometheus(baseURL string, service string) (string, error) {
 	queries := []metricQuery{
 		{"CPU 使用率", `100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`, "%"},
 		{"内存使用率", `(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100`, "%"},

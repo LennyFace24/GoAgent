@@ -20,15 +20,14 @@ type ChatService struct {
 	tools []tool.BaseTool
 }
 
-func NewChatService(fileService *FileService, convStore *store.ConversationStore) *ChatService {
-
+func NewChatService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore) *ChatService {
 	ctx := context.Background()
 	cfg := config.GetConfig()
 	maxTokens := cfg.Llm.MaxTokens
 	chatModel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
-		Model:              cfg.Llm.Model,
-		APIKey:             cfg.Llm.ApiKey,
-		BaseURL:            cfg.Llm.BaseUrl,
+		Model:               cfg.Llm.Model,
+		APIKey:              cfg.Llm.ApiKey,
+		BaseURL:             cfg.Llm.BaseUrl,
 		MaxCompletionTokens: &maxTokens,
 	})
 	if err != nil {
@@ -36,18 +35,12 @@ func NewChatService(fileService *FileService, convStore *store.ConversationStore
 		return nil
 	}
 
-	knowledgeTool, err := tools.NewKnowledgeSearchTool(fileService)
-	if err != nil {
-		log.Printf("ChatStreamService: 知识检索工具创建失败 %v", err)
-		return nil
-	}
-
-	tools_ := []tool.BaseTool{knowledgeTool}
+	tools_ := toolHandler.Tools()
 	toolInfos := make([]*schema.ToolInfo, len(tools_))
 	for i, t := range tools_ {
 		info, infoErr := t.Info(context.Background())
 		if infoErr != nil {
-			log.Printf("ChatStreamService: 获取工具信息失败 %v", infoErr)
+			log.Printf("ChatService: 获取工具信息失败 %v", infoErr)
 			return nil
 		}
 		toolInfos[i] = info
@@ -58,11 +51,10 @@ func NewChatService(fileService *FileService, convStore *store.ConversationStore
 		return nil
 	}
 
-
 	return &ChatService{
 		toolModel: toolModel,
-		store: convStore,
-		tools: tools_,
+		store:     convStore,
+		tools:     tools_,
 	}
 }
 

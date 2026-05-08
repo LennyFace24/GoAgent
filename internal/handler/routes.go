@@ -6,10 +6,11 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/gin-contrib/sessions"
-	"github.com/gin-gonic/gin"
 	"github.com/LennyFace24/MiniAgent/internal/service"
 	"github.com/LennyFace24/MiniAgent/internal/store"
+	"github.com/LennyFace24/MiniAgent/internal/tools"
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-gonic/gin"
 )
 
 var (
@@ -17,6 +18,7 @@ var (
 	chatStreamHandler *ChatStreamHandler
 	aiopsHandler      *AIOpsHandler
 	fileHandler       *FileHandler
+	toolsHandler      *tools.ToolHandler
 	convStore         *store.ConversationStore
 )
 
@@ -26,21 +28,31 @@ func SetupHandler(r *gin.Engine) {
 	if err != nil {
 		panic("初始化对话存储失败: " + err.Error())
 	}
-	chatHandler = NewChatHandler(service.NewChatService(
-		service.NewFileService(),
-		convStore,
-	))
 
-	chatStreamHandler = NewChatStreamHandler(service.NewChatStreamService(
-		service.NewFileService(),
-		convStore,
-	))
-	fileHandler = NewFileHandler(service.NewFileService())
+	fileService := service.NewFileService()
 
-	aiopsHandler = NewAIOpsHandler(service.NewAIOpsService(
-		service.NewFileService(),
-		convStore,
-	))
+	toolsHandler, err = tools.NewToolHandler(fileService)
+	if err != nil {
+		panic("初始化工具处理器失败: " + err.Error())
+	}
+
+	chatHandler = NewChatHandler(
+		service.NewChatService(
+			toolsHandler,
+			convStore,
+		))
+	chatStreamHandler = NewChatStreamHandler(
+		service.NewChatStreamService(
+			toolsHandler, 
+			convStore,
+			))
+	aiopsHandler = NewAIOpsHandler(
+		service.NewAIOpsService(
+			toolsHandler, convStore,
+			))
+	fileHandler = NewFileHandler(
+		fileService,
+	)
 }
 
 func SetupRoutes(r *gin.Engine) {

@@ -58,36 +58,17 @@ const aiopsInstruction = `你是专业的运维诊断专家。
 - 最终报告前必须完成所有排查步骤`
 
 type AIOpsService struct {
-	store       *store.ConversationStore
-	fileService *FileService
-	toolModel   model.ToolCallingChatModel
-	tools       []tool.BaseTool
+	store     *store.ConversationStore
+	toolModel model.ToolCallingChatModel
+	tools     []tool.BaseTool
 }
 
-func NewAIOpsService(fileService *FileService, convStore *store.ConversationStore) *AIOpsService {
-	healthCheckTool, err := tools.NewHealthCheckTool(cfg.GetConfig().Prometheus.URL)
-	if err != nil {
-		log.Printf("AIOpsService: 健康检查工具创建失败 %v", err)
-		return nil
-	}
-
-	logAnalyzerTool, err := tools.NewLogAnalyzerTool()
-	if err != nil {
-		log.Printf("AIOpsService: 日志分析工具创建失败 %v", err)
-		return nil
-	}
-
-	knowledgeTool, err := tools.NewKnowledgeSearchTool(fileService)
-	if err != nil {
-		log.Printf("AIOpsService: 知识检索工具创建失败 %v", err)
-		return nil
-	}
-
+func NewAIOpsService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore) *AIOpsService {
 	maxTokens := cfg.GetConfig().Llm.MaxTokens
 	chatModel, err := openai.NewChatModel(context.Background(), &openai.ChatModelConfig{
-		Model:              cfg.GetConfig().Llm.Model,
-		APIKey:             cfg.GetConfig().Llm.ApiKey,
-		BaseURL:            cfg.GetConfig().Llm.BaseUrl,
+		Model:               cfg.GetConfig().Llm.Model,
+		APIKey:              cfg.GetConfig().Llm.ApiKey,
+		BaseURL:             cfg.GetConfig().Llm.BaseUrl,
 		MaxCompletionTokens: &maxTokens,
 	})
 	if err != nil {
@@ -95,7 +76,7 @@ func NewAIOpsService(fileService *FileService, convStore *store.ConversationStor
 		return nil
 	}
 
-	tools_ := []tool.BaseTool{healthCheckTool, logAnalyzerTool, knowledgeTool}
+	tools_ := toolHandler.Tools()
 	toolInfos := make([]*schema.ToolInfo, len(tools_))
 	for i, t := range tools_ {
 		info, infoErr := t.Info(context.Background())
@@ -113,10 +94,9 @@ func NewAIOpsService(fileService *FileService, convStore *store.ConversationStor
 	}
 
 	return &AIOpsService{
-		store:       convStore,
-		fileService: fileService,
-		toolModel:   toolModel,
-		tools:       tools_,
+		store:     convStore,
+		toolModel: toolModel,
+		tools:     tools_,
 	}
 }
 
@@ -145,8 +125,8 @@ func (s *AIOpsService) runDiagnosis(
 ) {
 	defer gen.Close()
 
-	const maxTurns = 5
-	for turn := 0; turn < maxTurns; turn++ {
+	const safetyLimit = 20
+	for turn := 0; turn < safetyLimit; turn++ {
 		log.Printf("[AIOps Turn %d] 调用 LLM...", turn)
 
 		stream, err := s.toolModel.Stream(ctx, messages)
@@ -186,16 +166,6 @@ func (s *AIOpsService) runDiagnosis(
 			messages = append(messages, msg)
 		}
 	}
-
-	// 达到最大轮次仍未结束，强制生成诊断报告
-	log.Printf("[AIOps Fallback] 模型 %d 轮均调用工具，强制要求生成报告", maxTurns)
-	messages = append(messages, schema.UserMessage("你已收集到足够的信息。现在请直接输出最终诊断报告，不要再调用任何工具。"))
-	stream, err := s.toolModel.Stream(ctx, messages)
-	if err != nil {
-		gen.Send(&adk.AgentEvent{Err: err})
-		return
-	}
-	gen.Send(adk.EventFromMessage(nil, stream, schema.Assistant, ""))
 }
 
 func (s *AIOpsService) executeTool(ctx context.Context, tc schema.ToolCall) (string, error) {
