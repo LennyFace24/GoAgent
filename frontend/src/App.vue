@@ -11,16 +11,22 @@ const conversations = ref([])
 async function loadConversations() {
   try {
     const res = await fetch('/conversations')
-    if (!res.ok) return
+    console.log('loadConversations status:', res.status)
+    if (!res.ok) {
+      console.error('loadConversations failed:', await res.text())
+      return
+    }
     const data = await res.json()
+    console.log('loadConversations response:', data)
     conversations.value = data.conversations || []
-    // 如果没有对话，自动创建一个
     if (conversations.value.length === 0) {
       await createConversation()
     } else if (!conversations.value.find(c => c.id === activeConversationId.value)) {
       activeConversationId.value = conversations.value[0].id
     }
-  } catch { /* ignore */ }
+  } catch (e) {
+    console.error('loadConversations error:', e)
+  }
 }
 
 async function createConversation() {
@@ -30,13 +36,20 @@ async function createConversation() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: '新对话' }),
     })
-    if (!res.ok) return
+    console.log('createConversation status:', res.status)
+    if (!res.ok) {
+      console.error('createConversation failed:', await res.text())
+      return
+    }
     const data = await res.json()
+    console.log('createConversation response:', data)
     if (data.conversation) {
       conversations.value.unshift(data.conversation)
       activeConversationId.value = data.conversation.id
     }
-  } catch { /* ignore */ }
+  } catch (e) {
+    console.error('createConversation error:', e)
+  }
 }
 
 function selectConversation(id) {
