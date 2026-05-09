@@ -11,6 +11,6 @@ embedding:
     api_key: YUF4KWW6VYUSBC3VH5YIMPMJUFMU1H6NKEMRGX1N
     model: Qwen3-Embedding-8B
 prometheus:
-    url: http://localhost:9090
+    url: http://prometheus:9090
 chromadb:
     url: http://chromadb:8088
