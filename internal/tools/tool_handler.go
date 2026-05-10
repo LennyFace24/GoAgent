@@ -43,7 +43,10 @@ func NewToolHandler(fileSearcher FileSearcher) (*ToolHandler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("创建 edit_file 工具失败: %w", err)
 	}
-
+	taskTool,err := NewTaskTool()
+	if err != nil {
+		return nil, fmt.Errorf("创建 task 工具失败: %w", err)
+	}
 	return &ToolHandler{
 		tools: []tool.BaseTool{
 			bashTool,
@@ -52,6 +55,7 @@ func NewToolHandler(fileSearcher FileSearcher) (*ToolHandler, error) {
 			editFileTool,
 			healthCheckTool,
 			knowledgeTool,
+			taskTool,
 		},
 	}, nil
 }
