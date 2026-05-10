@@ -1,15 +1,15 @@
 server:
-    host: 0.0.0.0 
+    host: 0.0.0.0
     port: 8080
 llm:
-    base_url: https://token-plan-cn.xiaomimimo.com/v1
-    api_key: tp-csyan88gqwgzs6pmfdbvhbzfxo1l1xcw0wnxikp401e6gaor
-    model: mimo-v2.5-pro
+    base_url: https://your-api.com/v1/
+    api_key: your-api-key
+    model: your-model
     max_completion_tokens: 8192
 embedding:
-    base_url: https://ai.gitee.com/v1
-    api_key: YUF4KWW6VYUSBC3VH5YIMPMJUFMU1H6NKEMRGX1N
-    model: Qwen3-Embedding-8B
+    base_url: https://your-embedding.com/v1
+    api_key: your-api-key
+    model: your-embedding-model
 prometheus:
     url: http://prometheus:9090
 chromadb:
