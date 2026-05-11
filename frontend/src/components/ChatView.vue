@@ -2,6 +2,9 @@
 import { ref, nextTick, onMounted, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { latexExtension } from '../latex.js'
+
+marked.use(latexExtension)
 
 const props = defineProps({
   mode: { type: String, required: true },
@@ -26,7 +29,16 @@ const msgBox = ref(null)
 
 function renderMd(text) {
   const raw = marked.parse(text, { breaks: true, gfm: true })
-  return DOMPurify.sanitize(raw)
+  return DOMPurify.sanitize(raw, {
+    ADD_TAGS: ['math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac',
+      'msqrt', 'mroot', 'mstyle', 'munder', 'mover', 'munderover', 'mspace',
+      'mpadded', 'menclose', 'annotation', 'annotation-xml',
+      'mglyph', 'maligngroup', 'malignmark', 'mtable', 'mtr', 'mtd', 'mlabeledtr'],
+    ADD_ATTR: ['mathvariant', 'mathsize', 'mathcolor', 'mathbackground',
+      'scriptsizemultiplier', 'scriptminsize', 'accent', 'accentunder',
+      'form', 'fence', 'separator', 'stretchy', 'symmetric', 'largeop',
+      'movablelimits', 'data-latex'],
+  })
 }
 
 function scrollBottom() {
@@ -337,6 +349,15 @@ watch(() => props.conversationId, () => { loadHistory() })
 }
 .msg-content.md :deep(a) { color: var(--accent); }
 .msg-content.md :deep(strong) { font-weight: 600; }
+.msg-content.md :deep(.katex-display) {
+  margin: 0.8em 0; overflow-x: auto; overflow-y: hidden;
+  padding: 4px 0;
+}
+.msg-content.md :deep(.katex) { font-size: 1.05em; }
+.msg-content.md :deep(.latex-error) {
+  color: var(--text-error); font-size: 0.82em;
+  background: var(--bubble-error-bg); padding: 2px 6px; border-radius: 4px;
+}
 
 .typing-cursor {
   display: inline; color: var(--accent);
