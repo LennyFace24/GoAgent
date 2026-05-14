@@ -86,7 +86,7 @@ func (s *ChatStreamService) ChatStream(ctx context.Context,
 	
 	systemPrompt := instruction
 	if desc := s.skills.DescribeAvailable(); desc != "" {
-		systemPrompt += "\n\n# 可用技能\n" + desc + "\n使用 skill 工具加载技能完整内容后按其规则执行。"
+		systemPrompt += "\n\n# 已安装的 Agent Skills（技能模块）\n" + desc + "\n以上是系统预装的技能模块，不是你的通用能力。当用户提到某个技能相关的需求时，调用 skill 工具（传入技能名称）来加载该技能的完整规则，然后按规则执行。"
 	}
 	messages := []*schema.Message{schema.SystemMessage(systemPrompt)}
 	messages = append(messages, history...)
