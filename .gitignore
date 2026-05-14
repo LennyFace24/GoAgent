@@ -19,8 +19,6 @@ config.yaml
 # Data
 data/
 
-# External skills
-skills/
 
 # Uploaded files
 images/
@@ -52,3 +50,6 @@ Thumbs.db
 
 # Claude Code
 .claude/
+
+# third-party skills
+skills/
