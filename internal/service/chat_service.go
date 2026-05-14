@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/LennyFace24/MiniAgent/internal/config"
+	skills_registry "github.com/LennyFace24/MiniAgent/internal/skills/registry"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
@@ -16,11 +17,12 @@ import (
 
 type ChatService struct {
 	toolModel model.ToolCallingChatModel
-	store *store.ConversationStore
-	tools []tool.BaseTool
+	store     *store.ConversationStore
+	tools     []tool.BaseTool
+	skills    *skills_registry.SkillRegistry
 }
 
-func NewChatService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore) *ChatService {
+func NewChatService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore, skills *skills_registry.SkillRegistry) *ChatService {
 	ctx := context.Background()
 	cfg := config.GetConfig()
 	maxTokens := cfg.Llm.MaxTokens
@@ -55,6 +57,7 @@ func NewChatService(toolHandler *tools.ToolHandler, convStore *store.Conversatio
 		toolModel: toolModel,
 		store:     convStore,
 		tools:     tools_,
+		skills:    skills,
 	}
 }
 
@@ -64,7 +67,11 @@ func (s *ChatService) Chat(ctx context.Context, sessionID string, conversationID
 		log.Printf("ChatService: 加载历史记录失败 %v", err)
 	}
 
-	messages := []*schema.Message{schema.SystemMessage(instruction)}
+	systemPrompt := instruction
+	if desc := s.skills.DescribeAvailable(); desc != "" {
+		systemPrompt += "\n\n# 可用技能\n" + desc + "\n使用 skill 工具加载技能完整内容后按其规则执行。"
+	}
+	messages := []*schema.Message{schema.SystemMessage(systemPrompt)}
 	messages = append(messages,history...)
 	messages = append(messages, schema.UserMessage(message))
 

@@ -19,6 +19,9 @@ config.yaml
 # Data
 data/
 
+# External skills
+skills/
+
 # Uploaded files
 images/
 *.png

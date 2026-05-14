@@ -1,4 +1,4 @@
-package tools
+package extratool
 
 import (
 	"bufio"
@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/LennyFace24/MiniAgent/internal/tools/basic_tool"
 
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
@@ -33,7 +35,7 @@ func NewTodoWriter() (tool.InvokableTool, error) {
 状态图标：⬜待办 🔄进行中 ✅已完成
 AI 应根据用户需求生成结构化的、可执行的任务清单，而不是简单罗列。`,
 		func(ctx context.Context, input TodoWriterInput) (string, error) {
-			if err := isPathSafe(input.Path); err != nil {
+			if err := basictool.IsPathSafe(input.Path); err != nil {
 				return fmt.Sprintf("错误: %v", err), nil
 			}
 			if len(input.Content) == 0 {
@@ -59,8 +61,8 @@ func NewTodoReader() (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"read_todo",
 		"读取待办事项文件内容，查看当前任务进度。返回带行号的 Markdown 文本，包含各任务的状态（⬜待办/🔄进行中/✅已完成）。",
-		func(ctx context.Context, input ReadFileInput) (string, error) {
-			if err := isPathSafe(input.Path); err != nil {
+		func(ctx context.Context, input basictool.ReadFileInput) (string, error) {
+			if err := basictool.IsPathSafe(input.Path); err != nil {
 				return fmt.Sprintf("错误: %v", err), nil
 			}
 
@@ -71,7 +73,7 @@ func NewTodoReader() (tool.InvokableTool, error) {
 			if info.IsDir() {
 				return "错误: 路径是目录，请使用 bash 工具的 ls 命令", nil
 			}
-			if info.Size() > maxFileReadBytes*5 {
+			if info.Size() > basictool.MaxFileReadBytes*5 {
 				return fmt.Sprintf("错误: 文件过大 (%d 字节)，超过限制", info.Size()), nil
 			}
 
@@ -111,8 +113,8 @@ func NewTodoReader() (tool.InvokableTool, error) {
 				}
 				line := scanner.Text()
 				totalBytes += len(line) + 1
-				if totalBytes > maxFileReadBytes {
-					fmt.Fprintf(&sb, "\n[输出截断: 超过 %d 字节]", maxFileReadBytes)
+				if totalBytes > basictool.MaxFileReadBytes {
+					fmt.Fprintf(&sb, "\n[输出截断: 超过 %d 字节]", basictool.MaxFileReadBytes)
 					break
 				}
 				fmt.Fprintf(&sb, "%6d\t%s\n", lineNum, line)

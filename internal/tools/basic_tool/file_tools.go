@@ -1,4 +1,4 @@
-package tools
+package basictool
 
 import (
 	"bufio"
@@ -13,7 +13,7 @@ import (
 )
 
 const (
-	maxFileReadBytes = 200 * 1024 // 200KB 单次读取上限
+	MaxFileReadBytes = 200 * 1024 // 200KB 单次读取上限
 	maxFileWriteBytes = 1024 * 1024 // 1MB 单次写入上限
 )
 
@@ -34,7 +34,7 @@ type EditFileInput struct {
 	NewText string `json:"new_text" description:"替换后的新文本" required:"true"`
 }
 
-func isPathSafe(path string) error {
+func IsPathSafe(path string) error {
 	if strings.Contains(path, "..") {
 		return fmt.Errorf("路径不允许包含 ..")
 	}
@@ -56,7 +56,7 @@ func NewReadFileTool() (tool.InvokableTool, error) {
 		"read_file",
 		"读取本地文件内容。支持按行偏移和数量限制读取。返回带行号的文本。",
 		func(ctx context.Context, input ReadFileInput) (string, error) {
-			if err := isPathSafe(input.Path); err != nil {
+			if err := IsPathSafe(input.Path); err != nil {
 				return fmt.Sprintf("错误: %v", err), nil
 			}
 
@@ -67,7 +67,7 @@ func NewReadFileTool() (tool.InvokableTool, error) {
 			if info.IsDir() {
 				return "错误: 路径是目录，请使用 bash 工具的 ls 命令", nil
 			}
-			if info.Size() > maxFileReadBytes*5 {
+			if info.Size() > MaxFileReadBytes*5 {
 				return fmt.Sprintf("错误: 文件过大 (%d 字节)，超过限制", info.Size()), nil
 			}
 
@@ -107,8 +107,8 @@ func NewReadFileTool() (tool.InvokableTool, error) {
 				}
 				line := scanner.Text()
 				totalBytes += len(line) + 1
-				if totalBytes > maxFileReadBytes {
-					sb.WriteString(fmt.Sprintf("\n[输出截断: 超过 %d 字节]", maxFileReadBytes))
+				if totalBytes > MaxFileReadBytes {
+					sb.WriteString(fmt.Sprintf("\n[输出截断: 超过 %d 字节]", MaxFileReadBytes))
 					break
 				}
 				sb.WriteString(fmt.Sprintf("%6d\t%s\n", lineNum, line))
@@ -132,7 +132,7 @@ func NewWriteFileTool() (tool.InvokableTool, error) {
 		"write_file",
 		"创建或完全覆盖一个文件。如果文件已存在，原内容会被覆盖。优先使用 edit_file 修改现有文件。",
 		func(ctx context.Context, input WriteFileInput) (string, error) {
-			if err := isPathSafe(input.Path); err != nil {
+			if err := IsPathSafe(input.Path); err != nil {
 				return fmt.Sprintf("错误: %v", err), nil
 			}
 			if len(input.Content) > maxFileWriteBytes {
@@ -159,7 +159,7 @@ func NewEditFileTool() (tool.InvokableTool, error) {
 		"edit_file",
 		"在已有文件中精确替换文本。old_text 必须在文件中唯一出现一次，否则会报错。",
 		func(ctx context.Context, input EditFileInput) (string, error) {
-			if err := isPathSafe(input.Path); err != nil {
+			if err := IsPathSafe(input.Path); err != nil {
 				return fmt.Sprintf("错误: %v", err), nil
 			}
 			if input.OldText == "" {

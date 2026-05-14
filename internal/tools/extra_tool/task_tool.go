@@ -1,12 +1,13 @@
-package tools
+package extratool
 
 import (
 	"context"
 	"fmt"
 
+	"github.com/LennyFace24/MiniAgent/internal/config"
+	"github.com/LennyFace24/MiniAgent/internal/tools/basic_tool"
 	"github.com/LennyFace24/MiniAgent/internal/util"
 
-	"github.com/LennyFace24/MiniAgent/internal/config"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
@@ -33,10 +34,10 @@ func runSubAggent(ctx context.Context, content TaskInput) string {
 	}
 
 	tools_ := []tool.BaseTool{
-		util.Must(NewBashTool()),
-		util.Must(NewReadFileTool()),
-		util.Must(NewEditFileTool()),
-		util.Must(NewWriteFileTool()),
+		util.Must(basictool.NewBashTool()),
+		util.Must(basictool.NewReadFileTool()),
+		util.Must(basictool.NewEditFileTool()),
+		util.Must(basictool.NewWriteFileTool()),
 	}
 
 	toolInfos := make([]*schema.ToolInfo, len(tools_))

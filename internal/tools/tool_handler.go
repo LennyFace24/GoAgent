@@ -4,6 +4,9 @@ import (
 	"fmt"
 
 	"github.com/LennyFace24/MiniAgent/internal/config"
+	"github.com/LennyFace24/MiniAgent/internal/tools/basic_tool"
+	"github.com/LennyFace24/MiniAgent/internal/tools/extra_tool"
+	"github.com/LennyFace24/MiniAgent/internal/tools/skill_tool"
 	"github.com/cloudwego/eino/components/tool"
 )
 
@@ -11,42 +14,48 @@ type ToolHandler struct {
 	tools []tool.BaseTool
 }
 
-func NewToolHandler(fileSearcher FileSearcher) (*ToolHandler, error) {
+func NewToolHandler(fileSearcher extratool.FileSearcher, skillLoader skilltool.SkillLoader) (*ToolHandler, error) {
 	cfg := config.GetConfig()
 
-	bashTool, err := NewBashTool()
+	bashTool, err := basictool.NewBashTool()
 	if err != nil {
 		return nil, fmt.Errorf("创建 bash 工具失败: %w", err)
 	}
 
-	healthCheckTool, err := NewHealthCheckTool(cfg.Prometheus.URL)
+	healthCheckTool, err := extratool.NewHealthCheckTool(cfg.Prometheus.URL)
 	if err != nil {
 		return nil, fmt.Errorf("创建 health_check 工具失败: %w", err)
 	}
 
-	knowledgeTool, err := NewKnowledgeSearchTool(fileSearcher)
+	knowledgeTool, err := extratool.NewKnowledgeSearchTool(fileSearcher)
 	if err != nil {
 		return nil, fmt.Errorf("创建 knowledge_search 工具失败: %w", err)
 	}
 
-	readFileTool, err := NewReadFileTool()
+	readFileTool, err := basictool.NewReadFileTool()
 	if err != nil {
 		return nil, fmt.Errorf("创建 read_file 工具失败: %w", err)
 	}
 
-	writeFileTool, err := NewWriteFileTool()
+	writeFileTool, err := basictool.NewWriteFileTool()
 	if err != nil {
 		return nil, fmt.Errorf("创建 write_file 工具失败: %w", err)
 	}
 
-	editFileTool, err := NewEditFileTool()
+	editFileTool, err := basictool.NewEditFileTool()
 	if err != nil {
 		return nil, fmt.Errorf("创建 edit_file 工具失败: %w", err)
 	}
-	taskTool,err := NewTaskTool()
+	taskTool,err := extratool.NewTaskTool()
 	if err != nil {
 		return nil, fmt.Errorf("创建 task 工具失败: %w", err)
 	}
+
+	skillTool, err := skilltool.NewSkillTool(skillLoader)
+	if err != nil {
+		return nil, fmt.Errorf("创建 skill 工具失败: %w", err)
+	}
+
 	return &ToolHandler{
 		tools: []tool.BaseTool{
 			bashTool,
@@ -56,6 +65,7 @@ func NewToolHandler(fileSearcher FileSearcher) (*ToolHandler, error) {
 			healthCheckTool,
 			knowledgeTool,
 			taskTool,
+			skillTool,
 		},
 	}, nil
 }

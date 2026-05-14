@@ -6,6 +6,7 @@ import (
 	"log"
 
 	cfg "github.com/LennyFace24/MiniAgent/internal/config"
+	skills_registry "github.com/LennyFace24/MiniAgent/internal/skills/registry"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
 	"github.com/cloudwego/eino-ext/components/model/openai"
@@ -33,9 +34,10 @@ type ChatStreamService struct {
 	store     *store.ConversationStore
 	toolModel model.ToolCallingChatModel
 	tools     []tool.BaseTool
+	skills    *skills_registry.SkillRegistry
 }
 
-func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore) *ChatStreamService {
+func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore, skills *skills_registry.SkillRegistry) *ChatStreamService {
 	maxTokens := cfg.GetConfig().Llm.MaxTokens
 	chatModel, err := openai.NewChatModel(context.Background(), &openai.ChatModelConfig{
 		Model:               cfg.GetConfig().Llm.Model,
@@ -69,6 +71,7 @@ func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.Conve
 		store:     convStore,
 		toolModel: toolModel,
 		tools:     tools_,
+		skills:    skills,
 	}
 }
 
@@ -80,8 +83,12 @@ func (s *ChatStreamService) ChatStream(ctx context.Context,
 		log.Printf("ChatStreamService: 加载历史失败 %v", err)
 		history = nil
 	}
-
-	messages := []*schema.Message{schema.SystemMessage(instruction)}
+	
+	systemPrompt := instruction
+	if desc := s.skills.DescribeAvailable(); desc != "" {
+		systemPrompt += "\n\n# 可用技能\n" + desc + "\n使用 skill 工具加载技能完整内容后按其规则执行。"
+	}
+	messages := []*schema.Message{schema.SystemMessage(systemPrompt)}
 	messages = append(messages, history...)
 	messages = append(messages, schema.UserMessage(userMsg))
 

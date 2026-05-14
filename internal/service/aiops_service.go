@@ -6,6 +6,7 @@ import (
 	"log"
 
 	cfg "github.com/LennyFace24/MiniAgent/internal/config"
+	skills_registry "github.com/LennyFace24/MiniAgent/internal/skills/registry"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
 	"github.com/cloudwego/eino-ext/components/model/openai"
@@ -61,9 +62,10 @@ type AIOpsService struct {
 	store     *store.ConversationStore
 	toolModel model.ToolCallingChatModel
 	tools     []tool.BaseTool
+	skills    *skills_registry.SkillRegistry
 }
 
-func NewAIOpsService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore) *AIOpsService {
+func NewAIOpsService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore, skills *skills_registry.SkillRegistry) *AIOpsService {
 	maxTokens := cfg.GetConfig().Llm.MaxTokens
 	chatModel, err := openai.NewChatModel(context.Background(), &openai.ChatModelConfig{
 		Model:               cfg.GetConfig().Llm.Model,
@@ -97,6 +99,7 @@ func NewAIOpsService(toolHandler *tools.ToolHandler, convStore *store.Conversati
 		store:     convStore,
 		toolModel: toolModel,
 		tools:     tools_,
+		skills:    skills,
 	}
 }
 
@@ -109,7 +112,11 @@ func (s *AIOpsService) Diagnose(ctx context.Context,
 		history = nil
 	}
 
-	messages := []*schema.Message{schema.SystemMessage(aiopsInstruction)}
+	systemPrompt := aiopsInstruction
+	if desc := s.skills.DescribeAvailable(); desc != "" {
+		systemPrompt += "\n\n# 可用技能\n" + desc + "\n使用 skill 工具加载技能完整内容后按其规则执行。"
+	}
+	messages := []*schema.Message{schema.SystemMessage(systemPrompt)}
 	messages = append(messages, history...)
 	messages = append(messages, schema.UserMessage(message))
 

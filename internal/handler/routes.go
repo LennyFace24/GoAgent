@@ -2,6 +2,7 @@ package handler
 
 import (
 	"github.com/LennyFace24/MiniAgent/internal/service"
+	skills_registry "github.com/LennyFace24/MiniAgent/internal/skills/registry"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
 	"github.com/gin-gonic/gin"
@@ -26,8 +27,9 @@ func SetupHandler(r *gin.Engine) {
 	}
 
 	fileService := service.NewFileService()
+	skillRegistry := skills_registry.NewSkillRegistry()
 
-	toolsHandler, err = tools.NewToolHandler(fileService)
+	toolsHandler, err = tools.NewToolHandler(fileService, skillRegistry)
 	if err != nil {
 		panic("初始化工具处理器失败: " + err.Error())
 	}
@@ -36,15 +38,17 @@ func SetupHandler(r *gin.Engine) {
 		service.NewChatService(
 			toolsHandler,
 			convStore,
+			skillRegistry,
 		))
 	chatStreamHandler = NewChatStreamHandler(
 		service.NewChatStreamService(
-			toolsHandler, 
+			toolsHandler,
 			convStore,
+			skillRegistry,
 			))
 	aiopsHandler = NewAIOpsHandler(
 		service.NewAIOpsService(
-			toolsHandler, convStore,
+			toolsHandler, convStore, skillRegistry,
 			))
 	fileHandler = NewFileHandler(
 		fileService,

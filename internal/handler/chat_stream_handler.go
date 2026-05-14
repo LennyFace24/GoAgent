@@ -37,7 +37,11 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 	defer cancel()
 
 	sessionID := sessions.Default(c).Get("session_id").(string)
+	// 将session_id conversationId注入到上下文中
 	conversationID := req.ConversationID
+	ctx = context.WithValue(ctx, "session_id", sessionID)
+	ctx = context.WithValue(ctx, "conversation_id", conversationID)
+	
 	if conversationID == "" {
 		conversationID = "default"
 	}
