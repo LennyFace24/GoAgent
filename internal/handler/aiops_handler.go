@@ -35,7 +35,7 @@ func (h *AIOpsHandler) Diagnose(c *gin.Context) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(c.Request.Context(), 180*time.Second)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 300*time.Second)
 	defer cancel()
 
 	sessionID := sessions.Default(c).Get("session_id").(string)
