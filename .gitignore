@@ -52,4 +52,5 @@ Thumbs.db
 .claude/
 
 # third-party skills
-skills/
+skills/*
+!skills/.gitkeep
