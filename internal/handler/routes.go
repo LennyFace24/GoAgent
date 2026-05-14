@@ -9,7 +9,6 @@ import (
 )
 
 var (
-	chatHandler       *ChatHandler
 	chatStreamHandler *ChatStreamHandler
 	aiopsHandler      *AIOpsHandler
 	fileHandler       *FileHandler
@@ -34,12 +33,6 @@ func SetupHandler(r *gin.Engine) {
 		panic("初始化工具处理器失败: " + err.Error())
 	}
 
-	chatHandler = NewChatHandler(
-		service.NewChatService(
-			toolsHandler,
-			convStore,
-			skillRegistry,
-		))
 	chatStreamHandler = NewChatStreamHandler(
 		service.NewChatStreamService(
 			toolsHandler,
@@ -60,7 +53,6 @@ func SetupHandler(r *gin.Engine) {
 
 func SetupRoutes(r *gin.Engine) {
 	// 聊天接口
-	r.POST("/chat", chatHandler.Chat)
 	r.POST("/chat_stream", chatStreamHandler.ChatStream)
 	// 上传文件接口
 	r.POST("/upload_file", fileHandler.UploadFile)

@@ -14,7 +14,6 @@ const emit = defineEmits(['update:mode', 'conversationCreated'])
 
 const modes = [
   { key: 'chat_stream', label: 'Chat Stream' },
-  { key: 'chat', label: 'Chat' },
   { key: 'ai_ops', label: 'AI Ops' },
 ]
 
@@ -69,36 +68,10 @@ async function send() {
   sending.value = true
   addMsg('user', text)
 
-  if (props.mode === 'chat') {
-    await sendNonStream(text)
-  } else {
-    await sendSSE(text)
-  }
+  await sendSSE(text)
 
   sending.value = false
   scrollBottom()
-}
-
-async function sendNonStream(text) {
-  try {
-    const res = await fetch('/chat', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: text, conversation_id: props.conversationId }),
-    })
-    if (!res.ok) {
-      addMsg('error', `HTTP ${res.status}: ${await res.text()}`)
-      return
-    }
-    const data = await res.json()
-    if (data.error) {
-      addMsg('error', data.error)
-    } else {
-      addMsg('assistant', data.reply || '(空回复)')
-    }
-  } catch (e) {
-    addMsg('error', `请求失败: ${e.message}`)
-  }
 }
 
 async function sendSSE(text) {
@@ -167,7 +140,6 @@ function onKeydown(e) {
 
 const placeholders = {
   chat_stream: '输入消息，Enter 发送，Shift+Enter 换行',
-  chat: '输入消息，Enter 发送，Shift+Enter 换行',
   ai_ops: '描述故障现象，如：API 响应时间从 200ms 飙升到 3s，错误率 12%',
 }
 
