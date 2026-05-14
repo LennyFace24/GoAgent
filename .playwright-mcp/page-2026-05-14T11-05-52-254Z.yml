@@ -1,0 +1,175 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - generic [ref=e3]:
+      - link "Learn Claude Code" [ref=e4] [cursor=pointer]:
+        - /url: /en/
+      - navigation [ref=e5]:
+        - link "Reference" [ref=e6] [cursor=pointer]:
+          - /url: /en/reference/
+        - link "Compare" [ref=e7] [cursor=pointer]:
+          - /url: /en/compare/
+        - generic [ref=e8]:
+          - button "EN" [ref=e9]
+          - button "中文" [ref=e10]
+          - button "日本語" [ref=e11]
+        - button [ref=e12]
+        - link [ref=e14] [cursor=pointer]:
+          - /url: https://github.com/shareAI-lab/learn-claude-code
+          - img [ref=e15]
+  - main [ref=e18]:
+    - generic [ref=e19]:
+      - generic [ref=e20]:
+        - heading "Learn Claude Code" [level=1] [ref=e21]
+        - paragraph [ref=e22]: 19 chapters across 4 stages, from the minimal loop to a multi-agent platform and external capability bus
+        - link "Start Learning" [ref=e24] [cursor=pointer]:
+          - /url: /en/s01/
+          - text: Start Learning
+          - generic [ref=e25]: →
+      - generic [ref=e26]:
+        - generic [ref=e27]:
+          - generic [ref=e30]: Core Loop
+          - list [ref=e31]:
+            - listitem [ref=e32]:
+              - 'link "s01 The Agent Loop An agent is just a loop: send messages, execute tools, feed results back, repeat." [ref=e33] [cursor=pointer]':
+                - /url: /en/s01/
+                - generic [ref=e34]:
+                  - generic [ref=e35]: s01
+                  - generic [ref=e36]: The Agent Loop
+                - paragraph [ref=e37]: "An agent is just a loop: send messages, execute tools, feed results back, repeat."
+            - listitem [ref=e38]:
+              - link "s02 Tool Use Adding a tool means adding one handler. The loop never changes." [ref=e39] [cursor=pointer]:
+                - /url: /en/s02/
+                - generic [ref=e40]:
+                  - generic [ref=e41]: s02
+                  - generic [ref=e42]: Tool Use
+                - paragraph [ref=e43]: Adding a tool means adding one handler. The loop never changes.
+            - listitem [ref=e44]:
+              - link "s03 TodoWrite A visible plan keeps the agent on track when tasks get complex." [ref=e45] [cursor=pointer]:
+                - /url: /en/s03/
+                - generic [ref=e46]:
+                  - generic [ref=e47]: s03
+                  - generic [ref=e48]: TodoWrite
+                - paragraph [ref=e49]: A visible plan keeps the agent on track when tasks get complex.
+            - listitem [ref=e50]:
+              - link "s04 Subagent A subagent is mainly a context boundary, not a process trick." [ref=e51] [cursor=pointer]:
+                - /url: /en/s04/
+                - generic [ref=e52]:
+                  - generic [ref=e53]: s04
+                  - generic [ref=e54]: Subagent
+                - paragraph [ref=e55]: A subagent is mainly a context boundary, not a process trick.
+            - listitem [ref=e56]:
+              - link "s05 Skills Discover cheaply, load deeply -- only when needed." [ref=e57] [cursor=pointer]:
+                - /url: /en/s05/
+                - generic [ref=e58]:
+                  - generic [ref=e59]: s05
+                  - generic [ref=e60]: Skills
+                - paragraph [ref=e61]: Discover cheaply, load deeply -- only when needed.
+            - listitem [ref=e62]:
+              - link "s06 Context Compact Compaction isn't deleting history -- it's relocating detail so the agent can keep working." [ref=e63] [cursor=pointer]:
+                - /url: /en/s06/
+                - generic [ref=e64]:
+                  - generic [ref=e65]: s06
+                  - generic [ref=e66]: Context Compact
+                - paragraph [ref=e67]: Compaction isn't deleting history -- it's relocating detail so the agent can keep working.
+        - generic [ref=e68]:
+          - generic [ref=e71]: System Hardening
+          - list [ref=e72]:
+            - listitem [ref=e73]:
+              - 'link "s07 Permission System Safety is a pipeline, not a boolean: deny, check mode, allow, then ask." [ref=e74] [cursor=pointer]':
+                - /url: /en/s07/
+                - generic [ref=e75]:
+                  - generic [ref=e76]: s07
+                  - generic [ref=e77]: Permission System
+                - paragraph [ref=e78]: "Safety is a pipeline, not a boolean: deny, check mode, allow, then ask."
+            - listitem [ref=e79]:
+              - link "s08 Hook System The loop owns control flow; hooks only observe, block, or annotate at named moments." [ref=e80] [cursor=pointer]:
+                - /url: /en/s08/
+                - generic [ref=e81]:
+                  - generic [ref=e82]: s08
+                  - generic [ref=e83]: Hook System
+                - paragraph [ref=e84]: The loop owns control flow; hooks only observe, block, or annotate at named moments.
+            - listitem [ref=e85]:
+              - link "s09 Memory System Memory gives direction; current observation gives truth." [ref=e86] [cursor=pointer]:
+                - /url: /en/s09/
+                - generic [ref=e87]:
+                  - generic [ref=e88]: s09
+                  - generic [ref=e89]: Memory System
+                - paragraph [ref=e90]: Memory gives direction; current observation gives truth.
+            - listitem [ref=e91]:
+              - link "s10 System Prompt The model sees a constructed input pipeline, not one giant static string." [ref=e92] [cursor=pointer]:
+                - /url: /en/s10/
+                - generic [ref=e93]:
+                  - generic [ref=e94]: s10
+                  - generic [ref=e95]: System Prompt
+                - paragraph [ref=e96]: The model sees a constructed input pipeline, not one giant static string.
+            - listitem [ref=e97]:
+              - link "s11 Error Recovery Most failures aren't true task failure -- they're signals to try a different path." [ref=e98] [cursor=pointer]:
+                - /url: /en/s11/
+                - generic [ref=e99]:
+                  - generic [ref=e100]: s11
+                  - generic [ref=e101]: Error Recovery
+                - paragraph [ref=e102]: Most failures aren't true task failure -- they're signals to try a different path.
+        - generic [ref=e103]:
+          - generic [ref=e106]: Task Runtime
+          - list [ref=e107]:
+            - listitem [ref=e108]:
+              - link "s12 Task System Todo lists help a session; durable task graphs coordinate work that outlives it." [ref=e109] [cursor=pointer]:
+                - /url: /en/s12/
+                - generic [ref=e110]:
+                  - generic [ref=e111]: s12
+                  - generic [ref=e112]: Task System
+                - paragraph [ref=e113]: Todo lists help a session; durable task graphs coordinate work that outlives it.
+            - listitem [ref=e114]:
+              - link "s13 Background Tasks Background execution is a runtime lane, not a second main loop." [ref=e115] [cursor=pointer]:
+                - /url: /en/s13/
+                - generic [ref=e116]:
+                  - generic [ref=e117]: s13
+                  - generic [ref=e118]: Background Tasks
+                - paragraph [ref=e119]: Background execution is a runtime lane, not a second main loop.
+            - listitem [ref=e120]:
+              - link "s14 Cron Scheduler Scheduling is not a separate system -- it just feeds the same agent loop from a timer." [ref=e121] [cursor=pointer]:
+                - /url: /en/s14/
+                - generic [ref=e122]:
+                  - generic [ref=e123]: s14
+                  - generic [ref=e124]: Cron Scheduler
+                - paragraph [ref=e125]: Scheduling is not a separate system -- it just feeds the same agent loop from a timer.
+        - generic [ref=e126]:
+          - generic [ref=e129]: Multi-Agent Platform
+          - list [ref=e130]:
+            - listitem [ref=e131]:
+              - link "s15 Agent Teams Teammates persist beyond one prompt, have identity, and coordinate through durable channels." [ref=e132] [cursor=pointer]:
+                - /url: /en/s15/
+                - generic [ref=e133]:
+                  - generic [ref=e134]: s15
+                  - generic [ref=e135]: Agent Teams
+                - paragraph [ref=e136]: Teammates persist beyond one prompt, have identity, and coordinate through durable channels.
+            - listitem [ref=e137]:
+              - link "s16 Team Protocols A protocol request is a structured message with an ID; the response must reference the same ID." [ref=e138] [cursor=pointer]:
+                - /url: /en/s16/
+                - generic [ref=e139]:
+                  - generic [ref=e140]: s16
+                  - generic [ref=e141]: Team Protocols
+                - paragraph [ref=e142]: A protocol request is a structured message with an ID; the response must reference the same ID.
+            - listitem [ref=e143]:
+              - link "s17 Autonomous Agents Autonomy is a bounded mechanism -- idle, scan, claim, resume -- not magic." [ref=e144] [cursor=pointer]:
+                - /url: /en/s17/
+                - generic [ref=e145]:
+                  - generic [ref=e146]: s17
+                  - generic [ref=e147]: Autonomous Agents
+                - paragraph [ref=e148]: Autonomy is a bounded mechanism -- idle, scan, claim, resume -- not magic.
+            - listitem [ref=e149]:
+              - link "s18 Worktree Isolation Tasks answer what; worktrees answer where. Keep them separate." [ref=e150] [cursor=pointer]:
+                - /url: /en/s18/
+                - generic [ref=e151]:
+                  - generic [ref=e152]: s18
+                  - generic [ref=e153]: Worktree Isolation
+                - paragraph [ref=e154]: Tasks answer what; worktrees answer where. Keep them separate.
+            - listitem [ref=e155]:
+              - link "s19 MCP & Plugin External capabilities join the same routing, permission, and result-append path as native tools." [ref=e156] [cursor=pointer]:
+                - /url: /en/s19/
+                - generic [ref=e157]:
+                  - generic [ref=e158]: s19
+                  - generic [ref=e159]: MCP & Plugin
+                - paragraph [ref=e160]: External capabilities join the same routing, permission, and result-append path as native tools.
+  - button "Open Next.js Dev Tools" [ref=e166] [cursor=pointer]:
+    - img [ref=e167]

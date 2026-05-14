@@ -7,6 +7,7 @@ import (
 
 	cfg "github.com/LennyFace24/MiniAgent/internal/config"
 	skills_registry "github.com/LennyFace24/MiniAgent/internal/skills/registry"
+	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
 	"github.com/cloudwego/eino-ext/components/model/openai"
@@ -31,13 +32,16 @@ const instruction = `你是专业的智能问答助手。
 - 中文回答，简洁专业，适当分段。`
 
 type ChatStreamService struct {
-	store     *store.ConversationStore
-	toolModel model.ToolCallingChatModel
-	tools     []tool.BaseTool
-	skills    *skills_registry.SkillRegistry
+	store         *store.ConversationStore
+	baseModel     model.BaseChatModel
+	toolModel     model.ToolCallingChatModel
+	tools         []tool.BaseTool
+	skills        *skills_registry.SkillRegistry
+	compactTrigger *contexttool.CompactTrigger
 }
 
 func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore, skills *skills_registry.SkillRegistry) *ChatStreamService {
+	compactTrigger := toolHandler.CompactTrigger
 	maxTokens := cfg.GetConfig().Llm.MaxTokens
 	chatModel, err := openai.NewChatModel(context.Background(), &openai.ChatModelConfig{
 		Model:               cfg.GetConfig().Llm.Model,
@@ -68,10 +72,12 @@ func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.Conve
 	}
 
 	return &ChatStreamService{
-		store:     convStore,
-		toolModel: toolModel,
-		tools:     tools_,
-		skills:    skills,
+		store:          convStore,
+		baseModel:      chatModel,
+		toolModel:      toolModel,
+		tools:          tools_,
+		skills:         skills,
+		compactTrigger: compactTrigger,
 	}
 }
 
@@ -93,7 +99,7 @@ func (s *ChatStreamService) ChatStream(ctx context.Context,
 	messages = append(messages, schema.UserMessage(userMsg))
 
 	iterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
-	go s.runConversation(ctx, messages, generator)
+	go s.runConversation(ctx, messages, generator, sessionID, conversationID)
 	return iterator, nil
 }
 
@@ -101,6 +107,8 @@ func (s *ChatStreamService) runConversation(
 	ctx context.Context,
 	messages []*schema.Message,
 	gen *adk.AsyncGenerator[*adk.AgentEvent],
+	sessionID string,
+	conversationID string,
 ) {
 	defer gen.Close()
 
@@ -114,6 +122,18 @@ func (s *ChatStreamService) runConversation(
 		turn++
 		// todo工具调用提醒
 		use_todo := false
+
+		// compact 检查：token 超阈值 或 LLM 主动触发
+		level := contexttool.ShouldCompact(messages)
+		if s.compactTrigger.IsTriggered() {
+			level = contexttool.CompactFull
+		}
+		switch level {
+		case contexttool.CompactFull:
+			messages = contexttool.CompactFunc(ctx, messages, s.baseModel, sessionID, conversationID)
+		case contexttool.CompactMicro:
+			messages = contexttool.MicroCompactFunc(messages)
+		}
 
 		stream, err := s.toolModel.Stream(ctx, messages)
 		if err != nil {

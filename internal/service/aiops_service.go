@@ -7,6 +7,7 @@ import (
 
 	cfg "github.com/LennyFace24/MiniAgent/internal/config"
 	skills_registry "github.com/LennyFace24/MiniAgent/internal/skills/registry"
+	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
 	"github.com/cloudwego/eino-ext/components/model/openai"
@@ -59,13 +60,16 @@ const aiopsInstruction = `你是专业的运维诊断专家。
 - 最终报告前必须完成所有排查步骤`
 
 type AIOpsService struct {
-	store     *store.ConversationStore
-	toolModel model.ToolCallingChatModel
-	tools     []tool.BaseTool
-	skills    *skills_registry.SkillRegistry
+	store         *store.ConversationStore
+	baseModel     model.BaseChatModel
+	toolModel     model.ToolCallingChatModel
+	tools         []tool.BaseTool
+	skills        *skills_registry.SkillRegistry
+	compactTrigger *contexttool.CompactTrigger
 }
 
 func NewAIOpsService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore, skills *skills_registry.SkillRegistry) *AIOpsService {
+	compactTrigger := toolHandler.CompactTrigger
 	maxTokens := cfg.GetConfig().Llm.MaxTokens
 	chatModel, err := openai.NewChatModel(context.Background(), &openai.ChatModelConfig{
 		Model:               cfg.GetConfig().Llm.Model,
@@ -96,10 +100,12 @@ func NewAIOpsService(toolHandler *tools.ToolHandler, convStore *store.Conversati
 	}
 
 	return &AIOpsService{
-		store:     convStore,
-		toolModel: toolModel,
-		tools:     tools_,
-		skills:    skills,
+		store:          convStore,
+		baseModel:      chatModel,
+		toolModel:      toolModel,
+		tools:          tools_,
+		skills:         skills,
+		compactTrigger: compactTrigger,
 	}
 }
 
@@ -121,7 +127,7 @@ func (s *AIOpsService) Diagnose(ctx context.Context,
 	messages = append(messages, schema.UserMessage(message))
 
 	iterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
-	go s.runDiagnosis(ctx, messages, generator)
+	go s.runDiagnosis(ctx, messages, generator, sessionID, conversationID)
 	return iterator, nil
 }
 
@@ -129,12 +135,26 @@ func (s *AIOpsService) runDiagnosis(
 	ctx context.Context,
 	messages []*schema.Message,
 	gen *adk.AsyncGenerator[*adk.AgentEvent],
+	sessionID string,
+	conversationID string,
 ) {
 	defer gen.Close()
 
 	const safetyLimit = 20
 	for turn := 0; turn < safetyLimit; turn++ {
 		log.Printf("[AIOps Turn %d] 调用 LLM...", turn)
+
+		// compact 检查：token 超阈值 或 LLM 主动触发
+		level := contexttool.ShouldCompact(messages)
+		if s.compactTrigger.IsTriggered() {
+			level = contexttool.CompactFull
+		}
+		switch level {
+		case contexttool.CompactFull:
+			messages = contexttool.CompactFunc(ctx, messages, s.baseModel, sessionID, conversationID)
+		case contexttool.CompactMicro:
+			messages = contexttool.MicroCompactFunc(messages)
+		}
 
 		stream, err := s.toolModel.Stream(ctx, messages)
 		if err != nil {

@@ -5,13 +5,15 @@ import (
 
 	"github.com/LennyFace24/MiniAgent/internal/config"
 	"github.com/LennyFace24/MiniAgent/internal/tools/basic_tool"
+	"github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/LennyFace24/MiniAgent/internal/tools/extra_tool"
 	"github.com/LennyFace24/MiniAgent/internal/tools/skill_tool"
 	"github.com/cloudwego/eino/components/tool"
 )
 
 type ToolHandler struct {
-	tools []tool.BaseTool
+	tools        []tool.BaseTool
+	CompactTrigger *contexttool.CompactTrigger
 }
 
 func NewToolHandler(fileSearcher extratool.FileSearcher, skillLoader skilltool.SkillLoader) (*ToolHandler, error) {
@@ -56,6 +58,11 @@ func NewToolHandler(fileSearcher extratool.FileSearcher, skillLoader skilltool.S
 		return nil, fmt.Errorf("创建 skill 工具失败: %w", err)
 	}
 
+	compactTool, compactTrigger, err := contexttool.NewCompactTool()
+	if err != nil {
+		return nil, fmt.Errorf("创建 compact 工具失败: %w", err)
+	}
+
 	return &ToolHandler{
 		tools: []tool.BaseTool{
 			bashTool,
@@ -66,7 +73,9 @@ func NewToolHandler(fileSearcher extratool.FileSearcher, skillLoader skilltool.S
 			knowledgeTool,
 			taskTool,
 			skillTool,
+			compactTool,
 		},
+		CompactTrigger: compactTrigger,
 	}, nil
 }
 
