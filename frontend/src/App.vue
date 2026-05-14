@@ -11,22 +11,15 @@ const conversations = ref([])
 async function loadConversations() {
   try {
     const res = await fetch('/conversations')
-    console.log('loadConversations status:', res.status)
-    if (!res.ok) {
-      console.error('loadConversations failed:', await res.text())
-      return
-    }
+    if (!res.ok) return
     const data = await res.json()
-    console.log('loadConversations response:', data)
     conversations.value = data.conversations || []
     if (conversations.value.length === 0) {
       await createConversation()
     } else if (!conversations.value.find(c => c.id === activeConversationId.value)) {
       activeConversationId.value = conversations.value[0].id
     }
-  } catch (e) {
-    console.error('loadConversations error:', e)
-  }
+  } catch { /* ignore */ }
 }
 
 async function createConversation() {
@@ -36,20 +29,13 @@ async function createConversation() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title: '新对话' }),
     })
-    console.log('createConversation status:', res.status)
-    if (!res.ok) {
-      console.error('createConversation failed:', await res.text())
-      return
-    }
+    if (!res.ok) return
     const data = await res.json()
-    console.log('createConversation response:', data)
     if (data.conversation) {
       conversations.value.unshift(data.conversation)
       activeConversationId.value = data.conversation.id
     }
-  } catch (e) {
-    console.error('createConversation error:', e)
-  }
+  } catch { /* ignore */ }
 }
 
 function selectConversation(id) {
@@ -69,9 +55,9 @@ async function deleteConversation(id) {
 onMounted(() => { loadConversations() })
 
 // ---- Sidebar resize ----
-const SIDEBAR_DEFAULT = 260
-const SIDEBAR_MIN = 180
-const SIDEBAR_MAX = 400
+const SIDEBAR_DEFAULT = 280
+const SIDEBAR_MIN = 200
+const SIDEBAR_MAX = 420
 const COLLAPSE_THRESHOLD = 60
 
 const sidebarWidth = ref(SIDEBAR_DEFAULT)
@@ -126,6 +112,11 @@ const selectedFile = ref(null)
 const uploadMsg = ref('')
 const uploading = ref(false)
 
+function onFileChange(e) {
+  selectedFile.value = e.target.files[0] || null
+  uploadMsg.value = ''
+}
+
 async function uploadFile() {
   if (!selectedFile.value || uploading.value) return
   uploading.value = true
@@ -177,11 +168,14 @@ async function doSearch() {
       :style="{ width: collapsed ? 0 : sidebarWidth + 'px' }"
     >
       <div class="sidebar-inner">
-        <div class="sidebar-brand">GoAgent</div>
+        <div class="sidebar-brand">goagent</div>
 
         <!-- Conversations -->
         <div class="sidebar-section">
-          <button class="new-chat-btn" @click="createConversation">+ 新对话</button>
+          <button class="new-chat-btn" @click="createConversation">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            新对话
+          </button>
           <div class="conv-list">
             <div
               v-for="conv in conversations" :key="conv.id"
@@ -189,36 +183,45 @@ async function doSearch() {
               @click="selectConversation(conv.id)"
             >
               <span class="conv-title">{{ conv.title || '新对话' }}</span>
-              <button class="conv-del" @click.stop="deleteConversation(conv.id)" title="删除">&times;</button>
+              <button class="conv-del" @click.stop="deleteConversation(conv.id)" title="删除">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              </button>
             </div>
           </div>
         </div>
 
+        <div class="section-divider"></div>
+
         <!-- File tools -->
         <div class="sidebar-section">
           <div class="section-title">文件</div>
-          <label class="file-label">
-            <input type="file" accept=".txt,.md,.json,.csv"
-              @change="e => selectedFile = e.target.files[0]" />
+          <label class="file-drop-zone">
+            <input type="file" accept=".txt,.md,.json,.csv" @change="onFileChange" />
+            <span v-if="!selectedFile">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+              选择文件
+            </span>
+            <span v-else class="file-selected">{{ selectedFile.name }}</span>
           </label>
-          <div class="file-name" v-if="selectedFile">{{ selectedFile.name }}</div>
           <button class="sidebar-btn" :disabled="!selectedFile || uploading" @click="uploadFile">
             {{ uploading ? '上传中...' : '上传' }}
           </button>
           <div class="upload-msg" v-if="uploadMsg">{{ uploadMsg }}</div>
         </div>
 
+        <div class="section-divider"></div>
+
+        <!-- Search -->
         <div class="sidebar-section">
           <div class="section-title">搜索</div>
-          <input class="sidebar-input" v-model="searchQuery" placeholder="搜索文档..."
-            @keydown.enter="doSearch" />
-          <button class="sidebar-btn" :disabled="!searchQuery.trim() || searching" @click="doSearch">
-            {{ searching ? '搜索中...' : '搜索' }}
-          </button>
+          <div class="search-input-wrap">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input class="sidebar-input" v-model="searchQuery" placeholder="搜索文档..."
+              @keydown.enter="doSearch" />
+          </div>
           <div class="search-results" v-if="searchResults.length">
             <div v-for="(r, i) in searchResults" :key="i" class="search-item">
-              <div class="search-idx">#{{ i + 1 }}</div>
-              <div class="search-text">{{ typeof r === 'string' ? r : JSON.stringify(r, null, 2) }}</div>
+              <div class="search-text">{{ typeof r === 'string' ? r : (r.content || r.text || JSON.stringify(r)) }}</div>
             </div>
           </div>
         </div>
@@ -232,7 +235,7 @@ async function doSearch() {
 
     <!-- Expand button (when collapsed) -->
     <button v-if="collapsed" class="expand-btn" @click="toggleSidebar">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>
     </button>
 
     <!-- Main chat area -->
@@ -244,63 +247,65 @@ async function doSearch() {
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 :root {
-  --bg-body: #0f0f13;
-  --bg-sidebar: #121218;
-  --bg-input-area: #0c0c14;
-  --bg-input: #0a0a12;
-  --bg-hover: #1a1a28;
-  --bg-active: #1e2a40;
-  --border-color: #1e1e28;
-  --border-input: #252530;
-  --border-focus: #3a4a50;
-  --text-primary: #e0e0e0;
-  --text-secondary: #999;
-  --text-muted: #555;
-  --text-heading: #f0f0f0;
-  --text-error: #d4787a;
-  --accent: #6c8cff;
-  --accent-dim: #2a3a60;
-  --accent-light: #b0c0f0;
-  --bubble-user-bg: #1e3050;
-  --bubble-user-border: #2a4570;
-  --bubble-assistant-bg: #181820;
-  --bubble-assistant-border: #262632;
-  --bubble-error-bg: #281818;
-  --bubble-error-border: #3a2020;
+  --bg-body: #111113;
+  --bg-sidebar: #161618;
+  --bg-input-area: #111113;
+  --bg-input: #1c1c1e;
+  --bg-hover: rgba(255,255,255,0.04);
+  --bg-active: rgba(255,255,255,0.06);
+  --border-color: rgba(255,255,255,0.06);
+  --border-input: rgba(255,255,255,0.08);
+  --border-focus: rgba(255,255,255,0.15);
+  --text-primary: #e8e8e8;
+  --text-secondary: #8e8e93;
+  --text-muted: #636366;
+  --text-heading: #f5f5f5;
+  --text-error: #ff6b6b;
+  --accent: #6e6ef7;
+  --accent-dim: rgba(110,110,247,0.1);
+  --accent-light: #8e8ef7;
+  --bubble-user-bg: rgba(110,110,247,0.08);
+  --bubble-user-border: rgba(110,110,247,0.15);
+  --bubble-assistant-bg: rgba(255,255,255,0.03);
+  --bubble-assistant-border: rgba(255,255,255,0.06);
+  --bubble-error-bg: rgba(255,107,107,0.08);
+  --bubble-error-border: rgba(255,107,107,0.15);
 }
 
 @media (prefers-color-scheme: light) {
   :root {
-    --bg-body: #f5f5f7;
-    --bg-sidebar: #eeeef2;
-    --bg-input-area: #f9f9fb;
-    --bg-input: #f0f0f4;
-    --bg-hover: rgba(0,0,0,0.04);
-    --bg-active: #dde4f8;
-    --border-color: #d8d8e0;
-    --border-input: #d0d0da;
-    --border-focus: #8899cc;
-    --text-primary: #1a1a24;
-    --text-secondary: #555;
-    --text-muted: #888;
-    --text-heading: #111;
-    --text-error: #c44;
-    --accent: #4466cc;
-    --accent-dim: #dde4f8;
-    --accent-light: #3355aa;
-    --bubble-user-bg: #dde4f8;
-    --bubble-user-border: #c0ccf0;
-    --bubble-assistant-bg: #f0f0f4;
-    --bubble-assistant-border: #e0e0e8;
-    --bubble-error-bg: #fce8e8;
-    --bubble-error-border: #f4c8c8;
+    --bg-body: #ffffff;
+    --bg-sidebar: #f9f9fb;
+    --bg-input-area: #ffffff;
+    --bg-input: #f2f2f7;
+    --bg-hover: rgba(0,0,0,0.03);
+    --bg-active: rgba(0,0,0,0.05);
+    --border-color: rgba(0,0,0,0.06);
+    --border-input: rgba(0,0,0,0.08);
+    --border-focus: rgba(0,0,0,0.2);
+    --text-primary: #1c1c1e;
+    --text-secondary: #8e8e93;
+    --text-muted: #aeaeb2;
+    --text-heading: #000;
+    --text-error: #ff3b30;
+    --accent: #5856d6;
+    --accent-dim: rgba(88,86,214,0.08);
+    --accent-light: #5856d6;
+    --bubble-user-bg: rgba(88,86,214,0.06);
+    --bubble-user-border: rgba(88,86,214,0.12);
+    --bubble-assistant-bg: rgba(0,0,0,0.02);
+    --bubble-assistant-border: rgba(0,0,0,0.05);
+    --bubble-error-bg: rgba(255,59,48,0.06);
+    --bubble-error-border: rgba(255,59,48,0.12);
   }
 }
 
 body {
-  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  font-family: -apple-system, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
   background: var(--bg-body); color: var(--text-primary);
   height: 100vh; overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 #app { height: 100%; }
 </style>
@@ -317,100 +322,139 @@ body {
   display: flex;
   position: relative;
   overflow: hidden;
+  transition: width 0.2s ease;
+  border-right: 1px solid var(--border-color);
 }
-.sidebar.collapsed { width: 0 !important; }
+.sidebar.collapsed { width: 0 !important; border-right: none; }
 .sidebar-inner {
   width: 100%; min-width: 0;
   display: flex; flex-direction: column;
-  padding: 16px; overflow-y: auto;
+  padding: 20px 16px; overflow-y: auto;
 }
 
-.sidebar-brand { font-size: 1.1rem; font-weight: 700; color: var(--text-heading); margin-bottom: 20px; white-space: nowrap; }
-.sidebar-section { margin-bottom: 18px; }
-.section-title { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 8px; }
-
-.file-label { display: block; margin-bottom: 6px; }
-.file-label input { width: 100%; font-size: 0.75rem; color: var(--text-secondary); }
-.file-name { font-size: 0.75rem; color: var(--accent); margin-bottom: 6px; word-break: break-all; }
-
-.sidebar-btn {
-  width: 100%; background: var(--bg-input); border: 1px solid var(--border-input);
-  color: var(--text-secondary); padding: 6px 14px; border-radius: 6px;
-  font-size: 0.8rem; cursor: pointer; margin-top: 6px;
-  transition: background 0.12s;
-}
-.sidebar-btn:hover { background: var(--bg-hover); }
-.sidebar-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-
-.upload-msg { font-size: 0.75rem; color: var(--text-muted); margin-top: 6px; }
-
-.sidebar-input {
-  width: 100%; background: var(--bg-input); border: 1px solid var(--border-input);
-  border-radius: 6px; color: var(--text-primary); padding: 7px 10px;
-  font-size: 0.8rem; outline: none; margin-bottom: 2px;
-}
-.sidebar-input:focus { border-color: var(--border-focus); }
-
-.search-results { margin-top: 8px; max-height: 200px; overflow-y: auto; }
-.search-item { display: flex; gap: 6px; margin-bottom: 6px; }
-.search-idx { font-size: 0.7rem; color: var(--accent); min-width: 18px; padding-top: 4px; }
-.search-text {
-  font-size: 0.72rem; color: var(--text-secondary); background: var(--bg-input);
-  border-radius: 4px; padding: 6px 8px; flex: 1;
-  max-height: 80px; overflow-y: auto; white-space: pre-wrap;
+.sidebar-brand {
+  font-size: 0.82rem; font-weight: 500; color: var(--text-muted);
+  margin-bottom: 24px; white-space: nowrap;
+  letter-spacing: 0.08em; text-transform: lowercase;
 }
 
-.sidebar-footer {
-  margin-top: auto; font-size: 0.7rem; color: var(--text-muted);
-  text-align: center; padding-top: 12px; white-space: nowrap;
+.sidebar-section { margin-bottom: 16px; }
+.section-title {
+  font-size: 0.68rem; font-weight: 500; text-transform: uppercase;
+  letter-spacing: 0.06em; color: var(--text-muted); margin-bottom: 10px;
+}
+.section-divider {
+  height: 1px; background: var(--border-color); margin: 4px 0 16px;
 }
 
+/* ---- New chat button ---- */
 .new-chat-btn {
-  width: 100%; background: var(--accent-dim); border: 1px solid var(--accent);
-  color: var(--accent-light); padding: 7px 14px; border-radius: 8px;
-  font-size: 0.8rem; cursor: pointer; margin-bottom: 10px;
-  transition: background 0.12s;
+  width: 100%; background: none; border: 1px solid var(--border-input);
+  color: var(--text-secondary); padding: 8px 14px; border-radius: 8px;
+  font-size: 0.8rem; cursor: pointer; margin-bottom: 12px;
+  transition: all 0.15s ease;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
 }
-.new-chat-btn:hover { background: var(--accent); color: #fff; }
+.new-chat-btn:hover { border-color: var(--border-focus); color: var(--text-primary); background: var(--bg-hover); }
 
-.conv-list { max-height: 240px; overflow-y: auto; }
+/* ---- Conversation list ---- */
+.conv-list { max-height: 280px; overflow-y: auto; }
 .conv-item {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 7px 10px; border-radius: 6px; cursor: pointer;
-  font-size: 0.78rem; color: var(--text-secondary);
-  transition: background 0.12s; margin-bottom: 2px;
+  padding: 8px 10px 8px 12px; border-radius: 6px; cursor: pointer;
+  font-size: 0.8rem; color: var(--text-secondary);
+  transition: all 0.12s ease; margin-bottom: 1px;
+  border-left: 2px solid transparent;
 }
 .conv-item:hover { background: var(--bg-hover); }
-.conv-item.active { background: var(--bg-active); color: var(--accent); }
+.conv-item.active {
+  background: var(--bg-active); color: var(--text-primary);
+  border-left-color: var(--accent);
+}
 .conv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .conv-del {
   background: none; border: none; color: var(--text-muted); cursor: pointer;
-  font-size: 1rem; padding: 0 4px; line-height: 1; opacity: 0;
+  padding: 2px; line-height: 1; opacity: 0; border-radius: 4px;
   transition: opacity 0.12s, color 0.12s;
+  display: flex; align-items: center; justify-content: center;
 }
 .conv-item:hover .conv-del { opacity: 1; }
 .conv-del:hover { color: var(--text-error); }
 
+/* ---- File upload ---- */
+.file-drop-zone {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 12px; border: 1px dashed var(--border-input); border-radius: 8px;
+  cursor: pointer; font-size: 0.78rem; color: var(--text-muted);
+  transition: all 0.15s ease; text-align: center;
+}
+.file-drop-zone:hover { border-color: var(--border-focus); color: var(--text-secondary); }
+.file-drop-zone input { display: none; }
+.file-selected { color: var(--accent-light); font-size: 0.75rem; word-break: break-all; }
+
+.sidebar-btn {
+  width: 100%; background: none; border: 1px solid var(--border-input);
+  color: var(--text-secondary); padding: 7px 14px; border-radius: 8px;
+  font-size: 0.78rem; cursor: pointer; margin-top: 8px;
+  transition: all 0.15s ease;
+}
+.sidebar-btn:hover { border-color: var(--border-focus); color: var(--text-primary); }
+.sidebar-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+.upload-msg { font-size: 0.72rem; color: var(--text-muted); margin-top: 8px; }
+
+/* ---- Search ---- */
+.search-input-wrap {
+  position: relative; display: flex; align-items: center;
+}
+.search-input-wrap svg {
+  position: absolute; left: 10px; color: var(--text-muted); pointer-events: none;
+}
+.sidebar-input {
+  width: 100%; background: var(--bg-input); border: 1px solid var(--border-input);
+  border-radius: 8px; color: var(--text-primary); padding: 8px 10px 8px 32px;
+  font-size: 0.8rem; outline: none;
+  transition: border-color 0.15s ease;
+}
+.sidebar-input:focus { border-color: var(--border-focus); }
+.sidebar-input::placeholder { color: var(--text-muted); }
+
+.search-results { margin-top: 10px; max-height: 240px; overflow-y: auto; }
+.search-item {
+  padding: 8px 10px; margin-bottom: 4px; border-radius: 6px;
+  background: var(--bg-input); border: 1px solid var(--border-color);
+}
+.search-text {
+  font-size: 0.75rem; color: var(--text-secondary);
+  max-height: 60px; overflow: hidden; text-overflow: ellipsis;
+  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+}
+
+.sidebar-footer {
+  margin-top: auto; font-size: 0.68rem; color: var(--text-muted);
+  text-align: center; padding-top: 16px; white-space: nowrap;
+}
+
 /* ---- Drag handle ---- */
 .drag-handle {
-  position: absolute; top: 0; right: -4px;
-  width: 8px; height: 100%; cursor: col-resize;
+  position: absolute; top: 0; right: -3px;
+  width: 6px; height: 100%; cursor: col-resize;
   z-index: 10;
 }
 .drag-handle:hover,
 .app-layout.dragging .drag-handle {
-  background: var(--accent); opacity: 0.3;
+  background: var(--accent); opacity: 0.2;
   border-radius: 2px;
 }
 
 /* ---- Expand button ---- */
 .expand-btn {
-  position: absolute; top: 12px; left: 8px; z-index: 20;
+  position: absolute; top: 14px; left: 8px; z-index: 20;
   width: 28px; height: 28px; border-radius: 6px;
   background: var(--bg-sidebar); border: 1px solid var(--border-color);
-  color: var(--text-secondary); cursor: pointer;
+  color: var(--text-muted); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  transition: background 0.12s;
+  transition: all 0.15s ease;
 }
 .expand-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
 </style>
