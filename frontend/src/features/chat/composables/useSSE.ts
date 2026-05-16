@@ -117,6 +117,12 @@ export function useSSE(messages: Ref<Message[]>) {
                 responded: false,
               })
             }
+            // 确保 assistantMsg 在数组末尾，这样后续的 data: 内容能正确 append
+            const idx = messages.value.indexOf(assistantMsg)
+            if (idx !== messages.value.length - 1) {
+              messages.value.splice(idx, 1)
+              messages.value.push(assistantMsg)
+            }
             scrollBottom(scrollEl)
           } catch { /* ignore */ }
         }
