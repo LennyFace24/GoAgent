@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick } from 'vue'
+import { ref, watch, onMounted, nextTick, toRef } from 'vue'
 import type { Message, PermissionMessage } from '../../../shared/types'
 import { useMessages } from '../composables/useMessages'
 import { useSSE } from '../composables/useSSE'
@@ -19,7 +19,8 @@ const emit = defineEmits<{
 }>()
 
 const msgBox = ref<HTMLElement | null>(null)
-const { messages, loadHistory } = useMessages(ref(props.conversationId))
+const conversationIdRef = toRef(props, 'conversationId')
+const { messages, loadHistory } = useMessages(conversationIdRef)
 const { sending, send, respondPermission } = useSSE(messages)
 
 function scrollBottom(): void {

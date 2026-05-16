@@ -2,12 +2,39 @@
 import { onMounted } from 'vue'
 import { useConversations } from '../composables/useConversations'
 import ConversationItem from './ConversationItem.vue'
+import type { Conversation } from '../types'
 
-const { conversations, activeId, load, create, remove, select } = useConversations()
+const props = defineProps<{
+  activeId: string
+}>()
+
+const emit = defineEmits<{
+  select: [id: string]
+  created: [id: string]
+}>()
+
+const { conversations, load, create, remove } = useConversations()
 
 onMounted(() => { load() })
 
-defineExpose({ activeId })
+async function handleCreate(): Promise<void> {
+  const newId = await create()
+  if (newId) {
+    emit('created', newId)
+  }
+}
+
+function handleSelect(id: string): void {
+  emit('select', id)
+}
+
+async function handleDelete(id: string): Promise<void> {
+  await remove(id)
+  // 如果删除的是当前活跃的，emit 一个新的 activeId
+  if (props.activeId === id && conversations.value.length > 0) {
+    emit('select', conversations.value[0].id)
+  }
+}
 </script>
 
 <template>
@@ -15,7 +42,7 @@ defineExpose({ activeId })
     <div class="sidebar-inner">
       <div class="sidebar-brand">goagent</div>
 
-      <button class="new-chat-btn" @click="create">
+      <button class="new-chat-btn" @click="handleCreate">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
         新对话
       </button>
@@ -26,8 +53,8 @@ defineExpose({ activeId })
           :key="conv.id"
           :conversation="conv"
           :active="activeId === conv.id"
-          @select="select(conv.id)"
-          @delete="remove(conv.id)"
+          @select="handleSelect(conv.id)"
+          @delete="handleDelete(conv.id)"
         />
       </div>
 
