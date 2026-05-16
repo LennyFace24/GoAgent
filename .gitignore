@@ -54,3 +54,6 @@ Thumbs.db
 # third-party skills
 skills/*
 !skills/.gitkeep
+
+# mcp config file
+.mcp.json

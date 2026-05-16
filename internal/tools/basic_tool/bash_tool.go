@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -24,20 +25,60 @@ type BashInput struct {
 	Timeout int    `json:"timeout" description:"超时时间（秒），默认 30，最大 120" required:"false"`
 }
 
-func isDangerous(cmd string) bool {
-	dangerous := []string{
-		"rm -rf /", "sudo", "shutdown", "reboot", "halt", "poweroff",
-		"> /dev/", "mkfs", "dd if=", ":(){ :|:& };:",
-		"chmod 777 /", "chown -R", "iptables -F",
-		"nohup", "disown", "&>/dev/null &",
-	}
-	for _, d := range dangerous {
-		if strings.Contains(cmd, d) {
-			return true
+// ---------- Bash Security Validator ----------
+
+type validator struct {
+	name    string
+	pattern *regexp.Regexp
+	severity string // "severe" = 直接 deny, "suspicious" = 可升级为 ask
+}
+
+var validators = []validator{
+	// severe: 直接拒绝
+	{"sudo", regexp.MustCompile(`\bsudo\b`), "severe"},
+	{"rm_rf", regexp.MustCompile(`\brm\s+(-[a-zA-Z]*)?r`), "severe"},
+	{"mkfs", regexp.MustCompile(`\bmkfs\b`), "severe"},
+	{"dd_if", regexp.MustCompile(`\bdd\s+if=`), "severe"},
+	{"chmod_777_root", regexp.MustCompile(`chmod\s+777\s+/`), "severe"},
+	{"chown_root", regexp.MustCompile(`chown\s+-R\s+.*/`), "severe"},
+	{"iptables_flush", regexp.MustCompile(`iptables\s+-F`), "severe"},
+	{"fork_bomb", regexp.MustCompile(`:\(\)\s*\{.*:.*\|.*:.*\}`), "severe"},
+	{"shutdown", regexp.MustCompile(`\b(shutdown|reboot|halt|poweroff)\b`), "severe"},
+	{"dev_null_write", regexp.MustCompile(`>\s*/dev/`), "severe"},
+
+	// suspicious: 可疑但可由用户确认
+	{"shell_metachar", regexp.MustCompile(`[;&|` + "`" + `]`), "suspicious"},
+	{"cmd_substitution", regexp.MustCompile(`\$\(`), "suspicious"},
+	{"ifs_injection", regexp.MustCompile(`\bIFS\s*=`), "suspicious"},
+	{"nohup_disown", regexp.MustCompile(`\b(nohup|disown)\b`), "suspicious"},
+	{"background_redirect", regexp.MustCompile(`&>/dev/null\s*&`), "suspicious"},
+	{"pipe_to_shell", regexp.MustCompile(`\|\s*(sh|bash)`), "suspicious"},
+}
+
+type ValidationResult struct {
+	Severe   bool     // true = 直接拒绝, false = 可疑但可让用户确认
+	Failures []string // 命中的规则名称列表
+}
+
+func validateBash(cmd string) ValidationResult {
+	var failures []string
+	severe := false
+	for _, v := range validators {
+		if v.pattern.MatchString(cmd) {
+			failures = append(failures, v.name)
+			if v.severity == "severe" {
+				severe = true
+			}
 		}
 	}
-	return false
+	return ValidationResult{Severe: severe, Failures: failures}
 }
+
+// ValidateBash 导出给权限系统使用
+func ValidateBash(cmd string) ValidationResult {
+	return validateBash(cmd)
+}
+
 
 func truncateOutput(s string) string {
 	if len(s) <= maxBashOutputBytes {
@@ -76,9 +117,10 @@ func NewBashTool() (tool.InvokableTool, error) {
 			if strings.TrimSpace(input.Command) == "" {
 				return "错误: 命令为空", nil
 			}
-			if isDangerous(input.Command) {
-				auditBash(input.Command, fmt.Errorf("blocked"))
-				return "错误: 命令被安全策略拦截，禁止执行危险操作", nil
+			vr := validateBash(input.Command)
+			if vr.Severe {
+				auditBash(input.Command, fmt.Errorf("blocked: %v", vr.Failures))
+				return fmt.Sprintf("错误: 命令被安全策略拦截（触发规则: %s）", strings.Join(vr.Failures, ", ")), nil
 			}
 
 			timeout := 30
