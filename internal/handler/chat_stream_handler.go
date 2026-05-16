@@ -2,12 +2,14 @@ package handler
 
 import (
 	"context"
-	"github.com/LennyFace24/MiniAgent/internal/service"
-	"github.com/gin-contrib/sessions"
-	"github.com/gin-gonic/gin"
 	"log"
 	"strings"
 	"time"
+
+	"github.com/LennyFace24/MiniAgent/internal/permission"
+	"github.com/LennyFace24/MiniAgent/internal/service"
+	"github.com/gin-contrib/sessions"
+	"github.com/gin-gonic/gin"
 )
 
 type ChatStreamHandler struct {
@@ -25,11 +27,8 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 		Message        string `json:"message"`
 		ConversationID string `json:"conversation_id"`
 	}
-	// 解析json
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(400, gin.H{
-			"error": err.Error(),
-		})
+		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
 
@@ -37,30 +36,35 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 	defer cancel()
 
 	sessionID := sessions.Default(c).Get("session_id").(string)
-	// 将session_id conversationId注入到上下文中
 	conversationID := req.ConversationID
 	ctx = context.WithValue(ctx, "session_id", sessionID)
 	ctx = context.WithValue(ctx, "conversation_id", conversationID)
-	
+
 	if conversationID == "" {
 		conversationID = "default"
 	}
 
-	iter, err := h.service.ChatStream(ctx,
+	iter, toolEvents, err := h.service.ChatStream(ctx,
 		sessionID, conversationID, req.Message)
 	if err != nil {
-		c.JSON(500, gin.H{
-			"error": err.Error(),
-		})
+		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
-	// 改为SSE连接
+
+	// SSE headers
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
 
-	// 完整的回复内容，用于后续保存到历史记录
 	var fullReply strings.Builder
+
+	// goroutine: 读取工具事件，通过 SSE 推送给前端
+	go func() {
+		for ev := range toolEvents {
+			c.SSEvent("tool", ev)
+			c.Writer.Flush()
+		}
+	}()
 
 	defer func() {
 		c.SSEvent("done", "")
@@ -69,10 +73,10 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 
 	for {
 		select {
-			case <-ctx.Done():
-				log.Println("ChatStream: 客户端断开或超时")
-				return
-			default:
+		case <-ctx.Done():
+			log.Println("ChatStream: 客户端断开或超时")
+			return
+		default:
 		}
 
 		event, ok := iter.Next()
@@ -117,4 +121,26 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 	} else {
 		log.Println("ChatStream: received empty reply")
 	}
+}
+
+// PermissionResponse 处理前端的权限确认响应
+func (h *ChatStreamHandler) PermissionResponse(c *gin.Context) {
+	var req struct {
+		ID       string `json:"id"`
+		Approved bool   `json:"approved"`
+		Always   bool   `json:"always"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	permission.HandleResponse(req.ID, req.Approved)
+
+	if req.Always && req.Approved {
+		// TODO: 持久化 allow 规则到配置文件
+		log.Printf("PermissionResponse: 用户选择始终允许 request=%s", req.ID)
+	}
+
+	c.JSON(200, gin.H{"ok": true})
 }

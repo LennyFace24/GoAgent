@@ -1,33 +1,37 @@
-<script setup>
+<script setup lang="ts">
 import { ref, nextTick, onMounted, watch } from 'vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { latexExtension } from '../latex.js'
+import type { Message, ToolEventData } from '../types'
 
 marked.use(latexExtension)
 
-const props = defineProps({
-  mode: { type: String, required: true },
-  conversationId: { type: String, default: 'default' },
-})
-const emit = defineEmits(['update:mode', 'conversationCreated'])
+const props = defineProps<{
+  mode: string
+  conversationId?: string
+}>()
+const emit = defineEmits<{
+  'update:mode': [value: string]
+  conversationCreated: []
+}>()
 
 const modes = [
   { key: 'chat_stream', label: 'Chat Stream' },
   { key: 'ai_ops', label: 'AI Ops' },
 ]
 
-function setMode(key) {
+function setMode(key: string): void {
   emit('update:mode', key)
 }
 
-const messages = ref([])
-const input = ref('')
-const sending = ref(false)
-const msgBox = ref(null)
+const messages = ref<Message[]>([])
+const input = ref<string>('')
+const sending = ref<boolean>(false)
+const msgBox = ref<HTMLElement | null>(null)
 
-function renderMd(text) {
-  const raw = marked.parse(text, { breaks: true, gfm: true })
+function renderMd(text: string): string {
+  const raw = marked.parse(text, { breaks: true, gfm: true }) as string
   return DOMPurify.sanitize(raw, {
     ADD_TAGS: ['math', 'semantics', 'mrow', 'mi', 'mo', 'mn', 'msup', 'msub', 'mfrac',
       'msqrt', 'mroot', 'mstyle', 'munder', 'mover', 'munderover', 'mspace',
@@ -40,28 +44,28 @@ function renderMd(text) {
   })
 }
 
-function scrollBottom() {
+function scrollBottom(): void {
   nextTick(() => {
     if (msgBox.value) msgBox.value.scrollTop = msgBox.value.scrollHeight
   })
 }
 
-function addMsg(role, content, streaming = false) {
+function addMsg(role: Message['role'], content: string, streaming = false): void {
   messages.value.push({ id: Date.now() + Math.random(), role, content, streaming })
   scrollBottom()
 }
 
-function appendLast(content) {
+function appendLast(content: string): void {
   const last = messages.value[messages.value.length - 1]
-  if (last) { last.content += content; scrollBottom() }
+  if (last?.content !== undefined) { last.content += content; scrollBottom() }
 }
 
-function finishLast() {
+function finishLast(): void {
   const last = messages.value[messages.value.length - 1]
   if (last) last.streaming = false
 }
 
-async function send() {
+async function send(): Promise<void> {
   const text = input.value.trim()
   if (!text || sending.value) return
   input.value = ''
@@ -74,13 +78,11 @@ async function send() {
   scrollBottom()
 }
 
-async function sendSSE(text) {
+async function sendSSE(text: string): Promise<void> {
   const endpoint = props.mode === 'ai_ops' ? '/ai_ops' : '/chat_stream'
-  const assistantMsg = { id: Date.now() + Math.random(), role: 'assistant', content: '', streaming: true }
+  const assistantMsg: Message = { id: Date.now() + Math.random(), role: 'assistant', content: '', streaming: true }
   messages.value.push(assistantMsg)
   scrollBottom()
-
-  let aborted = false
 
   try {
     const res = await fetch(endpoint, {
@@ -95,7 +97,7 @@ async function sendSSE(text) {
       return
     }
 
-    const reader = res.body.getReader()
+    const reader = res.body!.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
 
@@ -105,7 +107,7 @@ async function sendSSE(text) {
       buffer += decoder.decode(value, { stream: true })
 
       const lines = buffer.split('\n')
-      buffer = lines.pop()
+      buffer = lines.pop() || ''
 
       for (const line of lines) {
         if (!line.startsWith('data:')) continue
@@ -123,38 +125,78 @@ async function sendSSE(text) {
           // ignore unparseable SSE events
         }
       }
+
+      // 解析 tool 事件（event: tool）
+      for (let i = 0; i < lines.length; i++) {
+        if (!lines[i].startsWith('event:tool')) continue
+        const dataLine = lines[i + 1]
+        if (!dataLine || !dataLine.startsWith('data:')) continue
+        try {
+          const ev: ToolEventData = JSON.parse(dataLine.slice(5).trim())
+          if (ev.type === 'tool_call') {
+            const insertIdx = messages.value.indexOf(assistantMsg)
+            messages.value.splice(insertIdx, 0, {
+              id: Date.now() + Math.random(),
+              role: 'tool_call',
+              name: ev.name,
+              args: ev.args,
+              callId: ev.call_id,
+            })
+          } else if (ev.type === 'tool_result') {
+            messages.value.push({
+              id: Date.now() + Math.random(),
+              role: 'tool_result',
+              name: ev.name,
+              result: ev.result,
+              callId: ev.call_id,
+              collapsed: true,
+            })
+          } else if (ev.type === 'permission_request') {
+            messages.value.push({
+              id: Date.now() + Math.random(),
+              role: 'permission_req',
+              requestId: ev.request_id,
+              name: ev.name,
+              args: ev.args,
+              reason: ev.reason,
+              responded: false,
+            })
+          }
+          scrollBottom()
+        } catch { /* ignore */ }
+      }
     }
   } catch (e) {
-    appendLast(`\n\n[连接断开: ${e.message}]`)
+    appendLast(`\n\n[连接断开: ${e instanceof Error ? e.message : String(e)}]`)
   } finally {
     finishLast()
   }
 }
 
-function onKeydown(e) {
+function onKeydown(e: KeyboardEvent): void {
   if (e.key === 'Enter' && !e.shiftKey) {
     e.preventDefault()
     send()
   }
 }
 
-const placeholders = {
+const placeholders: Record<string, string> = {
   chat_stream: '输入消息，Enter 发送，Shift+Enter 换行',
   ai_ops: '描述故障现象，如：API 响应时间从 200ms 飙升到 3s，错误率 12%',
 }
 
-async function loadHistory() {
+async function loadHistory(): Promise<void> {
   messages.value = []
   try {
     const res = await fetch(`/conversation/${props.conversationId}`)
     if (!res.ok) return
     const data = await res.json()
-    const lines = data.messages || []
+    const lines: Array<{ role: string; content: string }> = data.messages || []
     for (const line of lines) {
       if (line.role === 'user' || line.role === 'assistant') {
         messages.value.push({
           id: Date.now() + Math.random(),
-          role: line.role,
+          role: line.role as Message['role'],
           content: line.content,
           streaming: false,
         })
@@ -166,6 +208,40 @@ async function loadHistory() {
 
 onMounted(() => { loadHistory() })
 watch(() => props.conversationId, () => { loadHistory() })
+
+// ---- 权限确认 ----
+async function respondPermission(msg: Message, approved: boolean, always = false): Promise<void> {
+  msg.responded = true
+  msg.approved = approved
+  try {
+    await fetch('/permission/response', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: msg.requestId, approved, always }),
+    })
+  } catch { /* ignore */ }
+}
+
+// ---- 工具参数摘要 ----
+function summarizeArgs(args?: string): string {
+  if (!args) return ''
+  try {
+    const obj: Record<string, unknown> = JSON.parse(args)
+    const entries = Object.entries(obj)
+    if (entries.length === 0) return ''
+    const [, val] = entries[0]
+    const str = typeof val === 'string' ? val : JSON.stringify(val)
+    return str.length > 60 ? str.slice(0, 60) + '...' : str
+  } catch {
+    return args.length > 60 ? args.slice(0, 60) + '...' : args
+  }
+}
+
+function summarizeResult(result?: string): string {
+  if (!result) return ''
+  const firstLine = result.split('\n')[0]
+  return firstLine.length > 80 ? firstLine.slice(0, 80) + '...' : firstLine
+}
 </script>
 
 <template>
@@ -176,16 +252,52 @@ watch(() => props.conversationId, () => { loadHistory() })
         <div class="empty-text">发送一条消息开始对话</div>
       </div>
 
-      <div
-        v-for="msg in messages" :key="msg.id"
-        :class="['msg-row', msg.role]"
-      >
-        <div class="msg-bubble">
-          <div v-if="msg.role === 'assistant'" class="msg-content md" v-html="renderMd(msg.content)"></div>
-          <div v-else class="msg-content">{{ msg.content }}</div>
-          <span v-if="msg.streaming" class="typing-cursor">|</span>
+      <template v-for="msg in messages" :key="msg.id">
+        <!-- 工具调用 -->
+        <div v-if="msg.role === 'tool_call'" class="tool-call">
+          <span class="tool-icon">&gt;_</span>
+          <span class="tool-name">{{ msg.name }}</span>
+          <span class="tool-args">{{ summarizeArgs(msg.args) }}</span>
         </div>
-      </div>
+
+        <!-- 工具结果 -->
+        <div v-else-if="msg.role === 'tool_result'" class="tool-result" @click="msg.collapsed = !msg.collapsed">
+          <div class="tool-result-header">
+            <span class="tool-chevron" :class="{ open: !msg.collapsed }">&#9654;</span>
+            <span class="tool-name">{{ msg.name }}</span>
+            <span class="tool-summary" v-if="msg.collapsed">{{ summarizeResult(msg.result) }}</span>
+            <span class="tool-status" v-if="msg.collapsed">{{ msg.result ? (msg.result.length + ' chars') : '' }}</span>
+          </div>
+          <pre v-show="!msg.collapsed" class="tool-result-body">{{ msg.result }}</pre>
+        </div>
+
+        <!-- 权限确认 -->
+        <div v-else-if="msg.role === 'permission_req'" class="permission-card">
+          <div class="perm-header">
+            <span class="perm-icon">!</span>
+            <span class="perm-title">权限请求: {{ msg.name }}</span>
+          </div>
+          <div class="perm-reason">{{ msg.reason }}</div>
+          <div class="perm-args" v-if="msg.args">{{ summarizeArgs(msg.args) }}</div>
+          <div v-if="!msg.responded" class="perm-actions">
+            <button class="perm-btn deny" @click="respondPermission(msg, false)">拒绝</button>
+            <button class="perm-btn allow" @click="respondPermission(msg, true)">允许</button>
+            <button class="perm-btn always" @click="respondPermission(msg, true, true)">始终允许</button>
+          </div>
+          <div v-else class="perm-result">
+            {{ msg.approved ? '已允许' : '已拒绝' }}
+          </div>
+        </div>
+
+        <!-- 普通消息 -->
+        <div v-else :class="['msg-row', msg.role]">
+          <div class="msg-bubble">
+            <div v-if="msg.role === 'assistant'" class="msg-content md" v-html="renderMd(msg.content)"></div>
+            <div v-else class="msg-content">{{ msg.content }}</div>
+            <span v-if="msg.streaming" class="typing-cursor">|</span>
+          </div>
+        </div>
+      </template>
     </div>
 
     <!-- Mode selector + Input -->
@@ -373,4 +485,113 @@ watch(() => props.conversationId, () => { loadHistory() })
 }
 .send-btn:hover { opacity: 0.85; }
 .send-btn:disabled { opacity: 0.25; cursor: not-allowed; }
+
+/* ---- Tool call ---- */
+.tool-call {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 12px; border-radius: 8px;
+  background: var(--bg-hover); font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+.tool-icon {
+  font-family: 'SF Mono', 'Consolas', monospace;
+  font-size: 0.75rem; color: var(--accent); opacity: 0.7;
+}
+.tool-name {
+  font-weight: 500; color: var(--text-primary);
+  font-family: 'SF Mono', 'Consolas', monospace; font-size: 0.78rem;
+}
+.tool-args {
+  color: var(--text-muted); font-size: 0.75rem;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  flex: 1; min-width: 0;
+}
+
+/* ---- Tool result ---- */
+.tool-result {
+  border-radius: 8px; border: 1px solid var(--border-color);
+  overflow: hidden; cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+.tool-result:hover { border-color: var(--border-focus); }
+
+.tool-result-header {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; background: var(--bg-hover);
+  font-size: 0.78rem;
+}
+.tool-chevron {
+  font-size: 0.6rem; color: var(--text-muted);
+  transition: transform 0.15s ease;
+}
+.tool-chevron.open { transform: rotate(90deg); }
+.tool-summary {
+  color: var(--text-muted); flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 0.75rem;
+}
+.tool-status {
+  color: var(--text-muted); font-size: 0.7rem;
+  margin-left: auto;
+}
+
+.tool-result-body {
+  margin: 0; padding: 12px;
+  font-size: 0.78rem; line-height: 1.5;
+  font-family: 'SF Mono', 'Consolas', 'Fira Code', monospace;
+  color: var(--text-secondary);
+  background: var(--bg-input);
+  max-height: 400px; overflow-y: auto;
+  white-space: pre-wrap; word-break: break-all;
+}
+
+/* ---- Permission card ---- */
+.permission-card {
+  border-radius: 10px; border: 1px solid var(--accent);
+  padding: 14px 16px; background: var(--accent-dim);
+  max-width: 480px;
+}
+.perm-header {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px;
+}
+.perm-icon {
+  width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); color: #fff;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 0.7rem; font-weight: 700;
+}
+.perm-title {
+  font-size: 0.82rem; font-weight: 600; color: var(--text-primary);
+}
+.perm-reason {
+  font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 6px;
+}
+.perm-args {
+  font-size: 0.72rem; color: var(--text-muted);
+  font-family: 'SF Mono', 'Consolas', monospace;
+  padding: 6px 8px; background: var(--bg-hover); border-radius: 6px;
+  margin-bottom: 10px; word-break: break-all;
+}
+.perm-actions {
+  display: flex; gap: 8px;
+}
+.perm-btn {
+  padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border-input);
+  font-size: 0.78rem; cursor: pointer; transition: all 0.12s ease;
+}
+.perm-btn.deny {
+  background: none; color: var(--text-secondary);
+}
+.perm-btn.deny:hover { border-color: var(--text-error); color: var(--text-error); }
+.perm-btn.allow {
+  background: var(--accent); color: #fff; border-color: var(--accent);
+}
+.perm-btn.allow:hover { opacity: 0.85; }
+.perm-btn.always {
+  background: none; color: var(--accent); border-color: var(--accent);
+}
+.perm-btn.always:hover { background: var(--accent-dim); }
+.perm-result {
+  font-size: 0.78rem; color: var(--text-muted); font-style: italic;
+}
 </style>

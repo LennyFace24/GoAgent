@@ -60,6 +60,8 @@ func SetupRoutes(r *gin.Engine) {
 	r.POST("/search", fileHandler.Search)
 	// AIOps接口
 	r.POST("/ai_ops", aiopsHandler.Diagnose)
+	// 权限确认接口
+	r.POST("/permission/response", chatStreamHandler.PermissionResponse)
 	// 对话管理接口
 	r.GET("/conversations",conversationHandler.GetConversations)
 	r.POST("/conversation", conversationHandler.CreateConversation)

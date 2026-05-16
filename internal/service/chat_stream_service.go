@@ -2,19 +2,23 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	cfg "github.com/LennyFace24/MiniAgent/internal/config"
+	"github.com/LennyFace24/MiniAgent/internal/permission"
 	skills_registry "github.com/LennyFace24/MiniAgent/internal/skills/registry"
-	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
+	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	"github.com/google/uuid"
 )
 
 const instruction = `你是专业的智能问答助手。
@@ -31,13 +35,25 @@ const instruction = `你是专业的智能问答助手。
 # 输出规范
 - 中文回答，简洁专业，适当分段。`
 
+// ToolEvent 通过 SSE 推送给前端的工具事件
+type ToolEvent struct {
+	Type      string `json:"type"`       // "tool_call" | "tool_result" | "permission_request"
+	Name      string `json:"name"`       // 工具名称
+	Args      string `json:"args,omitempty"`
+	Result    string `json:"result,omitempty"`
+	CallID    string `json:"call_id,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
+	Reason    string `json:"reason,omitempty"`
+}
+
 type ChatStreamService struct {
-	store         *store.ConversationStore
-	baseModel     model.BaseChatModel
-	toolModel     model.ToolCallingChatModel
-	tools         []tool.BaseTool
-	skills        *skills_registry.SkillRegistry
+	store          *store.ConversationStore
+	baseModel      model.BaseChatModel
+	toolModel      model.ToolCallingChatModel
+	tools          []tool.BaseTool
+	skills         *skills_registry.SkillRegistry
 	compactTrigger *contexttool.CompactTrigger
+	perms          *permission.PermissionManager
 }
 
 func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore, skills *skills_registry.SkillRegistry) *ChatStreamService {
@@ -78,18 +94,19 @@ func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.Conve
 		tools:          tools_,
 		skills:         skills,
 		compactTrigger: compactTrigger,
+		perms:          permission.NewPermissionManager(permission.ModeDefault),
 	}
 }
 
 func (s *ChatStreamService) ChatStream(ctx context.Context,
-	sessionID string, conversationID string, userMsg string) (*adk.AsyncIterator[*adk.AgentEvent], error) {
+	sessionID string, conversationID string, userMsg string) (*adk.AsyncIterator[*adk.AgentEvent], chan ToolEvent, error) {
 
 	history, err := s.store.LoadHistory(sessionID, conversationID)
 	if err != nil {
 		log.Printf("ChatStreamService: 加载历史失败 %v", err)
 		history = nil
 	}
-	
+
 	systemPrompt := instruction
 	if desc := s.skills.DescribeAvailable(); desc != "" {
 		systemPrompt += "\n\n# 已安装的 Agent Skills（技能模块）\n" + desc + "\n以上是系统预装的技能模块，不是你的通用能力。当用户提到某个技能相关的需求时，调用 skill 工具（传入技能名称）来加载该技能的完整规则，然后按规则执行。"
@@ -99,17 +116,20 @@ func (s *ChatStreamService) ChatStream(ctx context.Context,
 	messages = append(messages, schema.UserMessage(userMsg))
 
 	iterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
-	go s.runConversation(ctx, messages, generator, sessionID, conversationID)
-	return iterator, nil
+	toolEvents := make(chan ToolEvent, 64)
+	go s.runConversation(ctx, messages, generator, toolEvents, sessionID, conversationID)
+	return iterator, toolEvents, nil
 }
 
 func (s *ChatStreamService) runConversation(
 	ctx context.Context,
 	messages []*schema.Message,
 	gen *adk.AsyncGenerator[*adk.AgentEvent],
+	toolEvents chan ToolEvent,
 	sessionID string,
 	conversationID string,
 ) {
+	defer close(toolEvents)
 	defer gen.Close()
 
 	const maxTurns = 20
@@ -178,14 +198,86 @@ func (s *ChatStreamService) runConversation(
 		}
 
 		for _, tc := range fullMsg.ToolCalls {
-			result, toolErr := s.executeTool(ctx, tc)
-			if toolErr != nil {
-				result = fmt.Sprintf("工具执行失败: %v", toolErr)
+			// 发送 tool_call 事件
+			toolEvents <- ToolEvent{
+				Type:   "tool_call",
+				Name:   tc.Function.Name,
+				Args:   tc.Function.Arguments,
+				CallID: tc.ID,
 			}
+
+			// 解析工具参数
+			var toolInput map[string]any
+			json.Unmarshal([]byte(tc.Function.Arguments), &toolInput)
+			if toolInput == nil {
+				toolInput = map[string]any{}
+			}
+
+			// 权限检查
+			decision := s.perms.Check(tc.Function.Name, toolInput)
+			var result string
+
+			switch decision.Behavior {
+			case permission.BehaviorDeny:
+				result = fmt.Sprintf("Permission denied: %s", decision.Reason)
+				s.perms.RecordDenial()
+				log.Printf("[Turn %d] 工具 %s 被拒绝: %s", turn, tc.Function.Name, decision.Reason)
+
+			case "ask":
+				reqID := uuid.New().String()
+				toolEvents <- ToolEvent{
+					Type:      "permission_request",
+					Name:      tc.Function.Name,
+					Args:      tc.Function.Arguments,
+					RequestID: reqID,
+					Reason:    decision.Reason,
+					CallID:    tc.ID,
+				}
+
+				select {
+				case approved := <-permission.WaitForDecision(reqID):
+					if approved {
+						result, _ = s.executeTool(ctx, tc)
+						s.perms.ResetDenials()
+					} else {
+						result = "Permission denied by user"
+						s.perms.RecordDenial()
+					}
+				case <-time.After(60 * time.Second):
+					result = "Permission request timed out"
+					permission.CancelDecision(reqID)
+				case <-ctx.Done():
+					return
+				}
+
+			default: // allow
+				var toolErr error
+				result, toolErr = s.executeTool(ctx, tc)
+				if toolErr != nil {
+					result = fmt.Sprintf("工具执行失败: %v", toolErr)
+				}
+				s.perms.ResetDenials()
+			}
+
+			// 熔断器：连续拒绝 3 次，提示切换模式
+			if s.perms.ShouldSuggestPlanMode() {
+				result += "\n\n[系统提醒] 工具调用已连续多次被拒绝，建议切换到 plan 模式。"
+				s.perms.ResetDenials()
+			}
+
 			if needReminder {
 				result = result + "\n\n[系统提醒] 你已经连续多轮未更新待办事项，请立即调用 read_todo 和 write_todo 更新当前任务进度。"
 				needReminder = false
 			}
+
+			// 发送 tool_result 事件
+			toolEvents <- ToolEvent{
+				Type:   "tool_result",
+				Name:   tc.Function.Name,
+				Result: result,
+				CallID: tc.ID,
+			}
+
 			msg := schema.ToolMessage(result, tc.ID, schema.WithToolName(tc.Function.Name))
 			messages = append(messages, msg)
 		}

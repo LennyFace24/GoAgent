@@ -1,14 +1,15 @@
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import ChatView from './components/ChatView.vue'
+import type { Conversation, SearchResult } from './types'
 
-const activeMode = ref('chat_stream')
-const activeConversationId = ref('default')
+const activeMode = ref<string>('chat_stream')
+const activeConversationId = ref<string>('default')
 
 // ---- Conversations ----
-const conversations = ref([])
+const conversations = ref<Conversation[]>([])
 
-async function loadConversations() {
+async function loadConversations(): Promise<void> {
   try {
     const res = await fetch('/conversations')
     if (!res.ok) return
@@ -16,13 +17,13 @@ async function loadConversations() {
     conversations.value = data.conversations || []
     if (conversations.value.length === 0) {
       await createConversation()
-    } else if (!conversations.value.find(c => c.id === activeConversationId.value)) {
+    } else if (!conversations.value.find((c: Conversation) => c.id === activeConversationId.value)) {
       activeConversationId.value = conversations.value[0].id
     }
   } catch { /* ignore */ }
 }
 
-async function createConversation() {
+async function createConversation(): Promise<void> {
   try {
     const res = await fetch('/conversation', {
       method: 'POST',
@@ -38,14 +39,14 @@ async function createConversation() {
   } catch { /* ignore */ }
 }
 
-function selectConversation(id) {
+function selectConversation(id: string): void {
   activeConversationId.value = id
 }
 
-async function deleteConversation(id) {
+async function deleteConversation(id: string): Promise<void> {
   try {
     await fetch(`/conversation/${id}`, { method: 'DELETE' })
-    conversations.value = conversations.value.filter(c => c.id !== id)
+    conversations.value = conversations.value.filter((c: Conversation) => c.id !== id)
     if (activeConversationId.value === id) {
       activeConversationId.value = conversations.value.length > 0 ? conversations.value[0].id : 'default'
     }
@@ -60,13 +61,13 @@ const SIDEBAR_MIN = 200
 const SIDEBAR_MAX = 420
 const COLLAPSE_THRESHOLD = 60
 
-const sidebarWidth = ref(SIDEBAR_DEFAULT)
-const collapsed = ref(false)
-const dragging = ref(false)
+const sidebarWidth = ref<number>(SIDEBAR_DEFAULT)
+const collapsed = ref<boolean>(false)
+const dragging = ref<boolean>(false)
 let startX = 0
 let startW = 0
 
-function onDragStart(e) {
+function onDragStart(e: MouseEvent): void {
   e.preventDefault()
   dragging.value = true
   startX = e.clientX
@@ -75,9 +76,9 @@ function onDragStart(e) {
   document.addEventListener('mouseup', onDragEnd)
 }
 
-function onDragMove(e) {
+function onDragMove(e: MouseEvent): void {
   const delta = e.clientX - startX
-  let newW = startW + delta
+  const newW = startW + delta
   if (newW < COLLAPSE_THRESHOLD) {
     collapsed.value = true
     sidebarWidth.value = 0
@@ -87,13 +88,13 @@ function onDragMove(e) {
   }
 }
 
-function onDragEnd() {
+function onDragEnd(): void {
   dragging.value = false
   document.removeEventListener('mousemove', onDragMove)
   document.removeEventListener('mouseup', onDragEnd)
 }
 
-function toggleSidebar() {
+function toggleSidebar(): void {
   if (collapsed.value) {
     collapsed.value = false
     sidebarWidth.value = SIDEBAR_DEFAULT
@@ -108,16 +109,17 @@ onUnmounted(() => {
 })
 
 // ---- File upload ----
-const selectedFile = ref(null)
-const uploadMsg = ref('')
-const uploading = ref(false)
+const selectedFile = ref<File | null>(null)
+const uploadMsg = ref<string>('')
+const uploading = ref<boolean>(false)
 
-function onFileChange(e) {
-  selectedFile.value = e.target.files[0] || null
+function onFileChange(e: Event): void {
+  const target = e.target as HTMLInputElement
+  selectedFile.value = target.files?.[0] || null
   uploadMsg.value = ''
 }
 
-async function uploadFile() {
+async function uploadFile(): Promise<void> {
   if (!selectedFile.value || uploading.value) return
   uploading.value = true
   uploadMsg.value = ''
@@ -128,18 +130,18 @@ async function uploadFile() {
     const data = await res.json()
     uploadMsg.value = data.error ? `错误: ${data.error}` : `已上传: ${data.file}`
   } catch (e) {
-    uploadMsg.value = `失败: ${e.message}`
+    uploadMsg.value = `失败: ${e instanceof Error ? e.message : String(e)}`
   } finally {
     uploading.value = false
   }
 }
 
 // ---- Search ----
-const searchQuery = ref('')
-const searchResults = ref([])
-const searching = ref(false)
+const searchQuery = ref<string>('')
+const searchResults = ref<SearchResult[]>([])
+const searching = ref<boolean>(false)
 
-async function doSearch() {
+async function doSearch(): Promise<void> {
   if (!searchQuery.value.trim() || searching.value) return
   searching.value = true
   searchResults.value = []
@@ -152,7 +154,7 @@ async function doSearch() {
     const data = await res.json()
     searchResults.value = data.results || []
   } catch (e) {
-    searchResults.value = [{ error: e.message }]
+    searchResults.value = [{ error: e instanceof Error ? e.message : String(e) } as SearchResult]
   } finally {
     searching.value = false
   }

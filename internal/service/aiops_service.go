@@ -2,19 +2,23 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"time"
 
 	cfg "github.com/LennyFace24/MiniAgent/internal/config"
+	"github.com/LennyFace24/MiniAgent/internal/permission"
 	skills_registry "github.com/LennyFace24/MiniAgent/internal/skills/registry"
-	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
+	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/schema"
+	"github.com/google/uuid"
 )
 
 const aiopsInstruction = `你是专业的运维诊断专家。
@@ -60,12 +64,13 @@ const aiopsInstruction = `你是专业的运维诊断专家。
 - 最终报告前必须完成所有排查步骤`
 
 type AIOpsService struct {
-	store         *store.ConversationStore
-	baseModel     model.BaseChatModel
-	toolModel     model.ToolCallingChatModel
-	tools         []tool.BaseTool
-	skills        *skills_registry.SkillRegistry
+	store          *store.ConversationStore
+	baseModel      model.BaseChatModel
+	toolModel      model.ToolCallingChatModel
+	tools          []tool.BaseTool
+	skills         *skills_registry.SkillRegistry
 	compactTrigger *contexttool.CompactTrigger
+	perms          *permission.PermissionManager
 }
 
 func NewAIOpsService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore, skills *skills_registry.SkillRegistry) *AIOpsService {
@@ -106,11 +111,12 @@ func NewAIOpsService(toolHandler *tools.ToolHandler, convStore *store.Conversati
 		tools:          tools_,
 		skills:         skills,
 		compactTrigger: compactTrigger,
+		perms:          permission.NewPermissionManager(permission.ModeDefault),
 	}
 }
 
 func (s *AIOpsService) Diagnose(ctx context.Context,
-	sessionID string, conversationID string, message string) (*adk.AsyncIterator[*adk.AgentEvent], error) {
+	sessionID string, conversationID string, message string) (*adk.AsyncIterator[*adk.AgentEvent], chan ToolEvent, error) {
 
 	history, err := s.store.LoadHistory(sessionID, conversationID)
 	if err != nil {
@@ -127,24 +133,27 @@ func (s *AIOpsService) Diagnose(ctx context.Context,
 	messages = append(messages, schema.UserMessage(message))
 
 	iterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
-	go s.runDiagnosis(ctx, messages, generator, sessionID, conversationID)
-	return iterator, nil
+	toolEvents := make(chan ToolEvent, 64)
+	go s.runDiagnosis(ctx, messages, generator, toolEvents, sessionID, conversationID)
+	return iterator, toolEvents, nil
 }
 
 func (s *AIOpsService) runDiagnosis(
 	ctx context.Context,
 	messages []*schema.Message,
 	gen *adk.AsyncGenerator[*adk.AgentEvent],
+	toolEvents chan ToolEvent,
 	sessionID string,
 	conversationID string,
 ) {
 	defer gen.Close()
+	defer close(toolEvents)
 
 	const safetyLimit = 20
 	for turn := 0; turn < safetyLimit; turn++ {
 		log.Printf("[AIOps Turn %d] 调用 LLM...", turn)
 
-		// compact 检查：token 超阈值 或 LLM 主动触发
+		// compact 检查
 		level := contexttool.ShouldCompact(messages)
 		if s.compactTrigger.IsTriggered() {
 			level = contexttool.CompactFull
@@ -183,12 +192,82 @@ func (s *AIOpsService) runDiagnosis(
 
 		messages = append(messages, fullMsg)
 		for _, tc := range fullMsg.ToolCalls {
-			result, toolErr := s.executeTool(ctx, tc)
-			if toolErr != nil {
-				gen.Send(&adk.AgentEvent{Err: toolErr})
-				return
+			// 发送 tool_call 事件
+			toolEvents <- ToolEvent{
+				Type:   "tool_call",
+				Name:   tc.Function.Name,
+				Args:   tc.Function.Arguments,
+				CallID: tc.ID,
 			}
+
+			// 解析工具参数
+			var toolInput map[string]any
+			json.Unmarshal([]byte(tc.Function.Arguments), &toolInput)
+			if toolInput == nil {
+				toolInput = map[string]any{}
+			}
+
+			// 权限检查
+			decision := s.perms.Check(tc.Function.Name, toolInput)
+			var result string
+
+			switch decision.Behavior {
+			case permission.BehaviorDeny:
+				result = fmt.Sprintf("Permission denied: %s", decision.Reason)
+				s.perms.RecordDenial()
+
+			case "ask":
+				reqID := uuid.New().String()
+				toolEvents <- ToolEvent{
+					Type:      "permission_request",
+					Name:      tc.Function.Name,
+					Args:      tc.Function.Arguments,
+					RequestID: reqID,
+					Reason:    decision.Reason,
+					CallID:    tc.ID,
+				}
+
+				select {
+				case approved := <-permission.WaitForDecision(reqID):
+					if approved {
+						result, _ = s.executeTool(ctx, tc)
+						s.perms.ResetDenials()
+					} else {
+						result = "Permission denied by user"
+						s.perms.RecordDenial()
+					}
+				case <-time.After(60 * time.Second):
+					result = "Permission request timed out"
+					permission.CancelDecision(reqID)
+				case <-ctx.Done():
+					return
+				}
+
+			default: // allow
+				var toolErr error
+				result, toolErr = s.executeTool(ctx, tc)
+				if toolErr != nil {
+					result = fmt.Sprintf("工具执行失败: %v", toolErr)
+				}
+				s.perms.ResetDenials()
+			}
+
+			// 熔断器
+			if s.perms.ShouldSuggestPlanMode() {
+				result += "\n\n[系统提醒] 工具调用已连续多次被拒绝，建议切换到 plan 模式。"
+				s.perms.ResetDenials()
+			}
+
 			log.Printf("[AIOps Turn %d] 工具 %s 返回 %d 字符", turn, tc.Function.Name, len(result))
+
+			// 发送 tool_result 事件
+			toolEvents <- ToolEvent{
+				Type:   "tool_result",
+				Name:   tc.Function.Name,
+				Result: result,
+				CallID: tc.ID,
+			}
+
 			msg := schema.ToolMessage(result, tc.ID, schema.WithToolName(tc.Function.Name))
 			messages = append(messages, msg)
 		}

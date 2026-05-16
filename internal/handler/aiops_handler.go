@@ -43,7 +43,8 @@ func (h *AIOpsHandler) Diagnose(c *gin.Context) {
 	if conversationID == "" {
 		conversationID = "default"
 	}
-	iter, err := h.service.Diagnose(ctx, sessionID, conversationID, req.Message)
+
+	iter, toolEvents, err := h.service.Diagnose(ctx, sessionID, conversationID, req.Message)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
@@ -54,6 +55,14 @@ func (h *AIOpsHandler) Diagnose(c *gin.Context) {
 	c.Writer.Header().Set("Connection", "keep-alive")
 
 	var fullReply strings.Builder
+
+	// goroutine: 读取工具事件，通过 SSE 推送给前端
+	go func() {
+		for ev := range toolEvents {
+			c.SSEvent("tool", ev)
+			c.Writer.Flush()
+		}
+	}()
 
 	defer func() {
 		c.SSEvent("done", "")
