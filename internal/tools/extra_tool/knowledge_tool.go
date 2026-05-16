@@ -32,6 +32,9 @@ func NewKnowledgeSearchTool(fileSearcher FileSearcher) (tool.InvokableTool, erro
 			if err != nil {
 				return "", err
 			}
+			if len(results) == 0 {
+				return "(未找到相关文档)", nil
+			}
 			return strings.Join(results, "\n---\n"), nil
 		},
 	)

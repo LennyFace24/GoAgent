@@ -112,7 +112,7 @@ func instantQuery(client *http.Client, baseURL, promQL string) (string, error) {
 		return "", fmt.Errorf("prometheus 返回非 success")
 	}
 	if len(pr.Data.Result) == 0 {
-		return "", nil
+		return "(查询无结果)", nil
 	}
 
 	// 取第一条结果的 value[1]
@@ -121,7 +121,7 @@ func instantQuery(client *http.Client, baseURL, promQL string) (string, error) {
 			return formatNumber(s), nil
 		}
 	}
-	return "", nil
+	return "(查询结果格式异常)", nil
 }
 
 func upQuery(client *http.Client, baseURL string) ([]string, error) {
