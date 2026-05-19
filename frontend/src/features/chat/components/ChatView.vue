@@ -21,7 +21,7 @@ const emit = defineEmits<{
 const msgBox = ref<HTMLElement | null>(null)
 const conversationIdRef = toRef(props, 'conversationId')
 const { messages, loadHistory } = useMessages(conversationIdRef)
-const { sending, send, respondPermission } = useSSE(messages)
+const { sending, send, abort, respondPermission } = useSSE(messages)
 
 function scrollBottom(): void {
   nextTick(() => {
@@ -41,7 +41,10 @@ function handlePermission(msg: PermissionMessage, approved: boolean, always: boo
 }
 
 onMounted(() => { loadHistory() })
-watch(() => props.conversationId, () => { loadHistory() })
+watch(() => props.conversationId, () => {
+  abort()       // 取消旧对话的 SSE 请求
+  loadHistory() // 加载新对话的消息
+})
 </script>
 
 <template>

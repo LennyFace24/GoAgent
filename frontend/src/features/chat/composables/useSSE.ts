@@ -3,6 +3,7 @@ import type { Message, ToolEventData } from '../../../shared/types'
 
 export function useSSE(messages: Ref<Message[]>) {
   const sending = ref<boolean>(false)
+  let currentAbort: AbortController | null = null
 
   function scrollBottom(el: HTMLElement | null): void {
     nextTick(() => {
@@ -22,12 +23,26 @@ export function useSSE(messages: Ref<Message[]>) {
     if (last) last.streaming = false
   }
 
+  /** 取消当前正在进行的 SSE 请求 */
+  function abort(): void {
+    if (currentAbort) {
+      currentAbort.abort()
+      currentAbort = null
+    }
+    sending.value = false
+  }
+
   async function send(
     text: string,
     mode: string,
     conversationId: string,
     scrollEl: HTMLElement | null,
   ): Promise<void> {
+    // 取消之前的请求
+    abort()
+
+    const abortCtrl = new AbortController()
+    currentAbort = abortCtrl
     sending.value = true
 
     const assistantMsg: Message = {
@@ -45,6 +60,7 @@ export function useSSE(messages: Ref<Message[]>) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, conversation_id: conversationId }),
+        signal: abortCtrl.signal,
       })
 
       if (!res.ok) {
@@ -58,6 +74,12 @@ export function useSSE(messages: Ref<Message[]>) {
       let buffer = ''
 
       while (true) {
+        // 检查是否被取消
+        if (abortCtrl.signal.aborted) {
+          reader.cancel()
+          break
+        }
+
         const { done, value } = await reader.read()
         if (done) break
         buffer += decoder.decode(value, { stream: true })
@@ -117,7 +139,7 @@ export function useSSE(messages: Ref<Message[]>) {
                 responded: false,
               })
             }
-            // 确保 assistantMsg 在数组末尾，这样后续的 data: 内容能正确 append
+            // 确保 assistantMsg 在数组末尾
             const idx = messages.value.indexOf(assistantMsg)
             if (idx !== messages.value.length - 1) {
               messages.value.splice(idx, 1)
@@ -128,9 +150,15 @@ export function useSSE(messages: Ref<Message[]>) {
         }
       }
     } catch (e) {
+      if (abortCtrl.signal.aborted) return // 被取消，不显示错误
       appendLast(`\n\n[连接断开: ${e instanceof Error ? e.message : String(e)}]`)
     } finally {
-      finishLast()
+      if (!abortCtrl.signal.aborted) {
+        finishLast()
+      }
+      if (currentAbort === abortCtrl) {
+        currentAbort = null
+      }
       sending.value = false
     }
   }
@@ -148,5 +176,5 @@ export function useSSE(messages: Ref<Message[]>) {
     } catch { /* ignore */ }
   }
 
-  return { sending, send, respondPermission }
+  return { sending, send, abort, respondPermission }
 }
