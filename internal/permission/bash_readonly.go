@@ -38,10 +38,56 @@ func isSingleCommandReadOnly(cmd string) bool {
 	// 2. regex 白名单
 	for _, re := range readonlyRegexes {
 		if re.MatchString(cmd) {
+			// 特殊命令需要额外检查危险 flags
+			name := extractCommandName(cmd)
+			if name == "find" && !isFindSafe(cmd) {
+				return false
+			}
+			if name == "jq" && !isJqSafe(cmd) {
+				return false
+			}
 			return true
 		}
 	}
 	return false
+}
+
+// find 的危险 flags
+var findDangerousFlags = []string{
+	"-exec", "-execdir", "-delete", "-ok", "-okdir",
+	"-fprint", "-fprint0", "-fls", "-fprintf",
+}
+
+// isFindSafe 检查 find 命令是否不包含危险 flags
+func isFindSafe(cmd string) bool {
+	fields := strings.Fields(cmd)
+	for _, f := range fields {
+		for _, dangerous := range findDangerousFlags {
+			if f == dangerous {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+// jq 的危险 flags
+var jqDangerousFlags = []string{
+	"-f", "--from-file", "--rawfile", "--slurpfile",
+	"--run-tests", "-L", "--library-path",
+}
+
+// isJqSafe 检查 jq 命令是否不包含危险 flags
+func isJqSafe(cmd string) bool {
+	fields := strings.Fields(cmd)
+	for _, f := range fields {
+		for _, dangerous := range jqDangerousFlags {
+			if f == dangerous {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // ---------- 前置过滤 ----------
@@ -360,8 +406,8 @@ var readonlyRegexes = []*regexp.Regexp{
 	// 特殊命令：echo（允许引号字符串，禁止 $ 展开）
 	regexp.MustCompile(`^echo(?:\s+(?:'[^']*'|"[^"$<>\n\r]*"|[^|;&\x60$(){}><#\\!"'\s]+))*\s*$`),
 
-	// find（阻止 -exec/-delete 等危险 flags）
-	regexp.MustCompile(`^find(?:\s+(?:\\[()]|(?!-delete\b|-exec\b|-execdir\b|-ok\b|-okdir\b|-fprint0?\b|-fls\b|-fprintf\b)[^<>()\x60$|{}&;\n\r\s]|\s)+)?$`),
+	// find（基础匹配，危险 flags 由 isFindSafe 单独检查）
+	regexp.MustCompile(`^find(?:\s+[^<>()\x60$|{}&;\n\r]*)?$`),
 
 	// ls（允许常规参数）
 	regexp.MustCompile(`^ls(?:\s+[^<>()\x60$|{}&;\n\r]*)?$`),
@@ -369,8 +415,8 @@ var readonlyRegexes = []*regexp.Regexp{
 	// cd（允许引号路径）
 	regexp.MustCompile(`^cd(?:\s+(?:'[^']*'|"[^"]*"|[^\s;|&\x60$(){}><#\\]+))?$`),
 
-	// jq（阻止 -f/--from-file/--rawfile 等）
-	regexp.MustCompile(`^jq(?!\s+.*(?:-f\b|--from-file|--rawfile|--slurpfile|--run-tests|-L\b))(?:\s+(?:-[a-zA-Z]+|--[a-zA-Z-]+(?:=\S+)?))*(?:\s+'[^\x60]*'|\s+"[^\x60"]*"|\s+[^-\s'][^\s]*)+\s*$`),
+	// jq（基础匹配，危险 flags 由 isJqSafe 单独检查）
+	regexp.MustCompile(`^jq(?:\s+[^<>()\x60$|{}&;\n\r]*)?$`),
 
 	// sed 只读模式（只有 -n，没有 -i）
 	regexp.MustCompile(`^sed\s+(?:-n\s+)?(?:'[^']*'|"[^"]*")+(?:\s+[^<>()\x60$|{}&;\n\r]+)*\s*$`),
