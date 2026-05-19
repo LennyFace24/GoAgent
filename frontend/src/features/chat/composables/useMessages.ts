@@ -19,6 +19,7 @@ export function useMessages(conversationId: Ref<string>) {
             role: 'user',
             content: line.content,
             streaming: false,
+            order: ++order,
           })
         } else if (line.role === 'assistant') {
           // 从 assistant 消息的 tool_calls 数组重建 tool_call 消息
@@ -39,6 +40,7 @@ export function useMessages(conversationId: Ref<string>) {
             role: 'assistant',
             content: line.content,
             streaming: false,
+            order: ++order,
           })
         } else if (line.role === 'tool') {
           messages.value.push({
@@ -52,8 +54,8 @@ export function useMessages(conversationId: Ref<string>) {
           })
         }
       }
-      // 将带 order 的消息（tool_call）排到对应 assistant 消息之前
-      messages.value.sort((a, b) => ((a as Message & { order?: number }).order || 0) - ((b as Message & { order?: number }).order || 0))
+      // 按 order 排序，保持原始顺序
+      messages.value.sort((a, b) => (a.order || 0) - (b.order || 0))
     } catch { /* ignore */ }
   }
 
