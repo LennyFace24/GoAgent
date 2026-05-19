@@ -87,8 +87,12 @@ func defaultRules() []Rule {
 		// deny: 危险命令
 		{Tool: "bash", Content: "rm -rf /", Behavior: BehaviorDeny},
 		{Tool: "bash", Content: "sudo *", Behavior: BehaviorDeny},
-		// allow: 读文件
+		// allow: 所有只读工具
 		{Tool: "read_file", Path: "*", Behavior: BehaviorAllow},
+		{Tool: "knowledge_search", Behavior: BehaviorAllow},
+		{Tool: "health_check", Behavior: BehaviorAllow},
+		{Tool: "read_todo", Behavior: BehaviorAllow},
+		{Tool: "skill", Behavior: BehaviorAllow},
 	}
 }
 
