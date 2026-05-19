@@ -312,11 +312,11 @@ func (s *ChatStreamService) executeTool(ctx context.Context, tc schema.ToolCall)
 	return "", fmt.Errorf("tool not found: %s", tc.Function.Name)
 }
 
-func (s *ChatStreamService) SaveReply(ctx context.Context, sessionID, conversationID, userMsg, aiMsg string) {
-	if err := s.store.SaveMessages(sessionID, conversationID,
-		schema.UserMessage(userMsg),
-		schema.AssistantMessage(aiMsg, nil),
-	); err != nil {
+func (s *ChatStreamService) SaveReply(ctx context.Context, sessionID, conversationID string, msgs []*schema.Message) {
+	if len(msgs) == 0 {
+		return
+	}
+	if err := s.store.SaveMessages(sessionID, conversationID, msgs...); err != nil {
 		log.Printf("ChatStreamService: 保存对话失败 %v", err)
 	}
 }

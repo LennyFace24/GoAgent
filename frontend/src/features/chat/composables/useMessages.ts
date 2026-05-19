@@ -1,5 +1,5 @@
 import { ref, type Ref } from 'vue'
-import type { Message } from '../../../shared/types'
+import type { Message, ApiMessage } from '../../../shared/types'
 
 export function useMessages(conversationId: Ref<string>) {
   const messages = ref<Message[]>([])
@@ -10,17 +10,50 @@ export function useMessages(conversationId: Ref<string>) {
       const res = await fetch(`/conversation/${conversationId.value}`)
       if (!res.ok) return
       const data = await res.json()
-      const lines: Array<{ role: string; content: string }> = data.messages || []
+      const lines: ApiMessage[] = data.messages || []
+      let order = 0
       for (const line of lines) {
-        if (line.role === 'user' || line.role === 'assistant') {
+        if (line.role === 'user') {
           messages.value.push({
             id: Date.now() + Math.random(),
-            role: line.role as 'user' | 'assistant',
+            role: 'user',
             content: line.content,
             streaming: false,
           })
+        } else if (line.role === 'assistant') {
+          // 从 assistant 消息的 tool_calls 数组重建 tool_call 消息
+          if (line.tool_calls) {
+            for (const tc of line.tool_calls) {
+              messages.value.push({
+                id: Date.now() + Math.random(),
+                role: 'tool_call',
+                name: tc.function.name,
+                args: tc.function.arguments,
+                callId: tc.id,
+                order: ++order,
+              })
+            }
+          }
+          messages.value.push({
+            id: Date.now() + Math.random(),
+            role: 'assistant',
+            content: line.content,
+            streaming: false,
+          })
+        } else if (line.role === 'tool') {
+          messages.value.push({
+            id: Date.now() + Math.random(),
+            role: 'tool_result',
+            name: line.tool_name || '',
+            result: line.content,
+            callId: line.tool_call_id || '',
+            collapsed: true,
+            order: ++order,
+          })
         }
       }
+      // 将带 order 的消息（tool_call）排到对应 assistant 消息之前
+      messages.value.sort((a, b) => ((a as Message & { order?: number }).order || 0) - ((b as Message & { order?: number }).order || 0))
     } catch { /* ignore */ }
   }
 

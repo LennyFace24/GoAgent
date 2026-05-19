@@ -134,7 +134,19 @@ func (pm *PermissionManager) Check(toolName string, toolInput map[string]any) De
 		}
 	}
 
-	// Step 2: 模式检查
+	// Step 2: Bash 只读判定
+	if toolName == "bash" {
+		cmd, _ := toolInput["command"].(string)
+		if IsBashReadOnly(cmd) {
+			return Decision{
+				Behavior: BehaviorAllow,
+				Reason:   "Bash 只读命令，自动放行",
+			}
+		}
+		// 非只读 → 继续走模式检查 → allow 规则 → ask
+	}
+
+	// Step 3: 模式检查
 	switch pm.mode {
 	case ModePlan:
 		if WriteTools[toolName] {

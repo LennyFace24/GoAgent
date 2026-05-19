@@ -8,6 +8,7 @@ import (
 
 	"github.com/LennyFace24/MiniAgent/internal/permission"
 	"github.com/LennyFace24/MiniAgent/internal/service"
+	"github.com/cloudwego/eino/schema"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -57,12 +58,29 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 	c.Writer.Header().Set("Connection", "keep-alive")
 
 	var fullReply strings.Builder
+	var toolMsgs []*schema.Message
 
-	// goroutine: 读取工具事件，通过 SSE 推送给前端
+	// goroutine: 读取工具事件，通过 SSE 推送给前端，同时收集用于持久化
 	go func() {
 		for ev := range toolEvents {
 			c.SSEvent("tool", ev)
 			c.Writer.Flush()
+			switch ev.Type {
+			case "tool_call":
+				toolMsgs = append(toolMsgs, &schema.Message{
+					Role: schema.Assistant,
+					ToolCalls: []schema.ToolCall{{
+						ID:   ev.CallID,
+						Type: "function",
+						Function: schema.FunctionCall{
+							Name:      ev.Name,
+							Arguments: ev.Args,
+						},
+					}},
+				})
+			case "tool_result":
+				toolMsgs = append(toolMsgs, schema.ToolMessage(ev.Result, ev.CallID, schema.WithToolName(ev.Name)))
+			}
 		}
 	}()
 
@@ -116,11 +134,12 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 		}
 	}
 
-	if fullReply.Len() > 0 {
-		h.service.SaveReply(ctx, sessionID, conversationID, req.Message, fullReply.String())
-	} else {
-		log.Println("ChatStream: received empty reply")
-	}
+	// 构建完整的消息列表：user + tool events + assistant
+	var convMessages []*schema.Message
+	convMessages = append(convMessages, schema.UserMessage(req.Message))
+	convMessages = append(convMessages, toolMsgs...)
+	convMessages = append(convMessages, schema.AssistantMessage(fullReply.String(), nil))
+	h.service.SaveReply(ctx, sessionID, conversationID, convMessages)
 }
 
 // PermissionResponse 处理前端的权限确认响应

@@ -23,8 +23,22 @@ type ConversationStore struct {
 }
 
 type messageLine struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string `json:"role"`
+	Content    string `json:"content"`
+	ToolCalls  []toolCallLine `json:"tool_calls,omitempty"`
+	ToolCallID string         `json:"tool_call_id,omitempty"`
+	ToolName   string         `json:"tool_name,omitempty"`
+}
+
+type toolCallLine struct {
+	ID       string          `json:"id"`
+	Type     string          `json:"type"`
+	Function functionCallLine `json:"function"`
+}
+
+type functionCallLine struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
 }
 
 func NewConversationStore(dir string) (*ConversationStore, error) {
@@ -130,7 +144,20 @@ func (s *ConversationStore) LoadHistory(sessionID, conversationID string) ([]*sc
 		case "user":
 			msgs = append(msgs, schema.UserMessage(line.Content))
 		case "assistant":
-			msgs = append(msgs, schema.AssistantMessage(line.Content, nil))
+			var toolCalls []schema.ToolCall
+			for _, tc := range line.ToolCalls {
+				toolCalls = append(toolCalls, schema.ToolCall{
+					ID:   tc.ID,
+					Type: tc.Type,
+					Function: schema.FunctionCall{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
+					},
+				})
+			}
+			msgs = append(msgs, schema.AssistantMessage(line.Content, toolCalls))
+		case "tool":
+			msgs = append(msgs, schema.ToolMessage(line.Content, line.ToolCallID, schema.WithToolName(line.ToolName)))
 		}
 	}
 	return msgs, scanner.Err()
@@ -151,6 +178,25 @@ func (s *ConversationStore) SaveMessages(sessionID, conversationID string, msgs 
 	encoder := json.NewEncoder(f)
 	for _, msg := range msgs {
 		line := messageLine{Role: string(msg.Role), Content: msg.Content}
+		if len(msg.ToolCalls) > 0 {
+			line.ToolCalls = make([]toolCallLine, len(msg.ToolCalls))
+			for i, tc := range msg.ToolCalls {
+				line.ToolCalls[i] = toolCallLine{
+					ID:   tc.ID,
+					Type: tc.Type,
+					Function: functionCallLine{
+						Name:      tc.Function.Name,
+						Arguments: tc.Function.Arguments,
+					},
+				}
+			}
+		}
+		if msg.ToolCallID != "" {
+			line.ToolCallID = msg.ToolCallID
+		}
+		if msg.ToolName != "" {
+			line.ToolName = msg.ToolName
+		}
 		if err := encoder.Encode(line); err != nil {
 			return fmt.Errorf("write message: %w", err)
 		}

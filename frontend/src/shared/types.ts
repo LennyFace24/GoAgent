@@ -7,6 +7,7 @@ export interface BaseMessage {
   role: MessageRole
   content?: string
   streaming?: boolean
+  order?: number
 }
 
 // 用户/助手消息
@@ -55,4 +56,19 @@ export interface ToolEventData {
   call_id?: string
   request_id?: string
   reason?: string
+}
+
+// API 返回的消息格式（来自 GET /conversation/:id）
+export interface ApiToolCall {
+  id: string
+  type: string
+  function: { name: string; arguments: string }
+}
+
+export interface ApiMessage {
+  role: string
+  content: string
+  tool_calls?: ApiToolCall[]
+  tool_call_id?: string
+  tool_name?: string
 }
