@@ -35,13 +35,17 @@ export function useMessages(conversationId: Ref<string>) {
               })
             }
           }
-          messages.value.push({
-            id: Date.now() + Math.random(),
-            role: 'assistant',
-            content: line.content,
-            streaming: false,
-            order: ++order,
-          })
+          // 只有 content 非空时才推入 assistant 消息
+          // tool_call 事件的 assistant 消息 content 为空，不显示
+          if (line.content) {
+            messages.value.push({
+              id: Date.now() + Math.random(),
+              role: 'assistant',
+              content: line.content,
+              streaming: false,
+              order: ++order,
+            })
+          }
         } else if (line.role === 'tool') {
           messages.value.push({
             id: Date.now() + Math.random(),
