@@ -1,4 +1,4 @@
-package skills_registry
+package skills
 
 import (
 	"fmt"
@@ -9,21 +9,12 @@ import (
 	"strings"
 )
 
-type SkillManifest struct {
-	Name        string
-	Description string
-}
-
-// skill 文档结构
-type SkillDocument struct {
-	Manifest SkillManifest
-	Body     string
-}
-
+// SkillRegistry 管理已安装的 skills。
 type SkillRegistry struct {
 	documents map[string]SkillDocument
 }
 
+// NewSkillRegistry 创建 registry 并加载 route.md 索引的所有 skill。
 func NewSkillRegistry() *SkillRegistry {
 	r := &SkillRegistry{documents: make(map[string]SkillDocument)}
 	r.loadAll()
@@ -46,7 +37,7 @@ func (r *SkillRegistry) loadAll() {
 		if err != nil {
 			continue
 		}
-		meta, body := parseFrontmatter(string(content))
+		meta, body := ParseFrontmatter(string(content))
 		name := meta["name"]
 		if name == "" {
 			name = filepath.Base(filepath.Dir(skillPath))
@@ -56,29 +47,12 @@ func (r *SkillRegistry) loadAll() {
 				Name:        name,
 				Description: meta["description"],
 			},
-			Body: strings.TrimSpace(body),
+			Body: body,
 		}
 	}
 }
 
-func parseFrontmatter(text string) (map[string]string, string) {
-	re := regexp.MustCompile(`(?s)^---\n(.*?)\n---\n(.*)`)
-	m := re.FindStringSubmatch(text)
-	if m == nil {
-		return nil, text
-	}
-	meta := make(map[string]string)
-	for _, line := range strings.Split(m[1], "\n") {
-		idx := strings.Index(line, ":")
-		if idx < 0 {
-			continue
-		}
-		meta[strings.TrimSpace(line[:idx])] = strings.TrimSpace(line[idx+1:])
-	}
-	return meta, m[2]
-}
-
-// DescribeAvailable 返回所有技能摘要，注入 system prompt
+// DescribeAvailable 返回所有 skill 的摘要列表。
 func (r *SkillRegistry) DescribeAvailable() string {
 	if len(r.documents) == 0 {
 		return ""
@@ -97,7 +71,7 @@ func (r *SkillRegistry) DescribeAvailable() string {
 	return sb.String()
 }
 
-// LoadFullText 返回指定技能完整内容，作为 skill tool 的返回值
+// LoadFullText 返回指定 skill 的完整内容。
 func (r *SkillRegistry) LoadFullText(name string) string {
 	doc, ok := r.documents[name]
 	if !ok {
@@ -109,4 +83,9 @@ func (r *SkillRegistry) LoadFullText(name string) string {
 		return fmt.Sprintf("Error: 未知技能 '%s'。可用技能: %s", name, strings.Join(known, ", "))
 	}
 	return fmt.Sprintf("<skill name=\"%s\">\n%s\n</skill>", doc.Manifest.Name, doc.Body)
+}
+
+// Documents 返回所有已加载的 skill 文档。
+func (r *SkillRegistry) Documents() map[string]SkillDocument {
+	return r.documents
 }

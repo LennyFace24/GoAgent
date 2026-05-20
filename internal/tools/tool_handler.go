@@ -7,16 +7,15 @@ import (
 	"github.com/LennyFace24/MiniAgent/internal/tools/basic_tool"
 	"github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/LennyFace24/MiniAgent/internal/tools/extra_tool"
-	"github.com/LennyFace24/MiniAgent/internal/tools/skill_tool"
 	"github.com/cloudwego/eino/components/tool"
 )
 
 type ToolHandler struct {
-	tools        []tool.BaseTool
+	tools          []tool.BaseTool
 	CompactTrigger *contexttool.CompactTrigger
 }
 
-func NewToolHandler(fileSearcher extratool.FileSearcher, skillLoader skilltool.SkillLoader) (*ToolHandler, error) {
+func NewToolHandler(fileSearcher extratool.FileSearcher) (*ToolHandler, error) {
 	cfg := config.GetConfig()
 
 	bashTool, err := basictool.NewBashTool()
@@ -48,14 +47,9 @@ func NewToolHandler(fileSearcher extratool.FileSearcher, skillLoader skilltool.S
 	if err != nil {
 		return nil, fmt.Errorf("创建 edit_file 工具失败: %w", err)
 	}
-	taskTool,err := extratool.NewTaskTool()
+	taskTool, err := extratool.NewTaskTool()
 	if err != nil {
 		return nil, fmt.Errorf("创建 task 工具失败: %w", err)
-	}
-
-	skillTool, err := skilltool.NewSkillTool(skillLoader)
-	if err != nil {
-		return nil, fmt.Errorf("创建 skill 工具失败: %w", err)
 	}
 
 	compactTool, compactTrigger, err := contexttool.NewCompactTool()
@@ -72,7 +66,6 @@ func NewToolHandler(fileSearcher extratool.FileSearcher, skillLoader skilltool.S
 			healthCheckTool,
 			knowledgeTool,
 			taskTool,
-			skillTool,
 			compactTool,
 		},
 		CompactTrigger: compactTrigger,

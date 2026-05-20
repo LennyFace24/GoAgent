@@ -9,7 +9,7 @@ import (
 
 	cfg "github.com/LennyFace24/MiniAgent/internal/config"
 	"github.com/LennyFace24/MiniAgent/internal/permission"
-	skills_registry "github.com/LennyFace24/MiniAgent/internal/skills/registry"
+	"github.com/LennyFace24/MiniAgent/internal/prompt"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
 	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
@@ -20,20 +20,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 )
-
-const instruction = `你是专业的智能问答助手。
-
-# 行为准则
-- 用户的请求主要涉及知识检索和问题回答。
-- 优先使用工具获取信息，获取到信息后立即给出答案。
-- 回答时基于工具返回的文档内容，标注信息来源。
-
-# 工具使用规范
-- 每轮对话中每种工具最多调用一次。
-- 工具返回空结果时，直接回复"根据现有资料无法回答该问题"。
-
-# 输出规范
-- 中文回答，简洁专业，适当分段。`
 
 // ToolEvent 通过 SSE 推送给前端的工具事件
 type ToolEvent struct {
@@ -51,12 +37,11 @@ type ChatStreamService struct {
 	baseModel      model.BaseChatModel
 	toolModel      model.ToolCallingChatModel
 	tools          []tool.BaseTool
-	skills         *skills_registry.SkillRegistry
 	compactTrigger *contexttool.CompactTrigger
 	perms          *permission.PermissionManager
 }
 
-func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore, skills *skills_registry.SkillRegistry) *ChatStreamService {
+func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore) *ChatStreamService {
 	compactTrigger := toolHandler.CompactTrigger
 	maxTokens := cfg.GetConfig().Llm.MaxTokens
 	chatModel, err := openai.NewChatModel(context.Background(), &openai.ChatModelConfig{
@@ -92,7 +77,6 @@ func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.Conve
 		baseModel:      chatModel,
 		toolModel:      toolModel,
 		tools:          tools_,
-		skills:         skills,
 		compactTrigger: compactTrigger,
 		perms:          permission.NewPermissionManager(permission.ModeDefault),
 	}
@@ -107,11 +91,10 @@ func (s *ChatStreamService) ChatStream(ctx context.Context,
 		history = nil
 	}
 
-	systemPrompt := instruction
-	if desc := s.skills.DescribeAvailable(); desc != "" {
-		systemPrompt += "\n\n# 已安装的 Agent Skills（技能模块）\n" + desc + "\n以上是系统预装的技能模块，不是你的通用能力。当用户提到某个技能相关的需求时，调用 skill 工具（传入技能名称）来加载该技能的完整规则，然后按规则执行。"
-	}
-	messages := []*schema.Message{schema.SystemMessage(systemPrompt)}
+	b := prompt.NewBuilder()
+	b.Add(prompt.CoreBlock())
+	b.Add(prompt.ToolsRuleBlock())
+	messages := []*schema.Message{schema.SystemMessage(b.Build())}
 	messages = append(messages, history...)
 	messages = append(messages, schema.UserMessage(userMsg))
 

@@ -2,20 +2,19 @@ package handler
 
 import (
 	"github.com/LennyFace24/MiniAgent/internal/service"
-	skills_registry "github.com/LennyFace24/MiniAgent/internal/skills/registry"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
 	"github.com/gin-gonic/gin"
 )
 
 var (
-	chatStreamHandler *ChatStreamHandler
-	aiopsHandler      *AIOpsHandler
-	fileHandler       *FileHandler
-	toolsHandler      *tools.ToolHandler
+	chatStreamHandler   *ChatStreamHandler
+	aiopsHandler        *AIOpsHandler
+	fileHandler         *FileHandler
+	toolsHandler        *tools.ToolHandler
 	conversationHandler *ConversationHandler
 
-	convStore         *store.ConversationStore
+	convStore *store.ConversationStore
 )
 
 func SetupHandler(r *gin.Engine) {
@@ -26,29 +25,18 @@ func SetupHandler(r *gin.Engine) {
 	}
 
 	fileService := service.NewFileService()
-	skillRegistry := skills_registry.NewSkillRegistry()
 
-	toolsHandler, err = tools.NewToolHandler(fileService, skillRegistry)
+	toolsHandler, err = tools.NewToolHandler(fileService)
 	if err != nil {
 		panic("初始化工具处理器失败: " + err.Error())
 	}
 
 	chatStreamHandler = NewChatStreamHandler(
-		service.NewChatStreamService(
-			toolsHandler,
-			convStore,
-			skillRegistry,
-			))
+		service.NewChatStreamService(toolsHandler, convStore))
 	aiopsHandler = NewAIOpsHandler(
-		service.NewAIOpsService(
-			toolsHandler, convStore, skillRegistry,
-			))
-	fileHandler = NewFileHandler(
-		fileService,
-	)
-	conversationHandler = NewConversationHandler(
-		convStore,
-	)
+		service.NewAIOpsService(toolsHandler, convStore))
+	fileHandler = NewFileHandler(fileService)
+	conversationHandler = NewConversationHandler(convStore)
 }
 
 func SetupRoutes(r *gin.Engine) {
@@ -63,9 +51,9 @@ func SetupRoutes(r *gin.Engine) {
 	// 权限确认接口
 	r.POST("/permission/response", chatStreamHandler.PermissionResponse)
 	// 对话管理接口
-	r.GET("/conversations",conversationHandler.GetConversations)
+	r.GET("/conversations", conversationHandler.GetConversations)
 	r.POST("/conversation", conversationHandler.CreateConversation)
 	r.GET("/conversation/:id", conversationHandler.GetConversation)
-	r.DELETE("/conversation/:id",conversationHandler.DeleteConversation)
+	r.DELETE("/conversation/:id", conversationHandler.DeleteConversation)
 
 }

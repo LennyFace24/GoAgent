@@ -9,7 +9,7 @@ import (
 
 	cfg "github.com/LennyFace24/MiniAgent/internal/config"
 	"github.com/LennyFace24/MiniAgent/internal/permission"
-	skills_registry "github.com/LennyFace24/MiniAgent/internal/skills/registry"
+	"github.com/LennyFace24/MiniAgent/internal/prompt"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
 	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
@@ -21,59 +21,16 @@ import (
 	"github.com/google/uuid"
 )
 
-const aiopsInstruction = `你是专业的运维诊断专家。
-
-# 工作流程
-收到故障描述后，严格按以下步骤进行：
-
-## 阶段 1: 计划 (Plan)
-分析问题，输出排查计划。格式：
-"## 排查计划
-1. [步骤1]
-2. [步骤2]
-..."
-
-## 阶段 2: 执行 (Execute)
-使用工具逐步执行计划：
-- 优先使用 health_check 检查服务健康状态
-- 使用 log_analyzer 分析错误日志
-- 使用 knowledge_search 查询相关运维文档
-- 每步执行后评估是否需要调整计划
-
-## 阶段 3: 重规划 (Replan)
-如果执行结果指向新问题方向，在此说明并调整后续步骤。
-
-## 阶段 4: 报告 (Report)
-汇总所有发现，输出最终诊断报告。格式：
-"## 诊断报告
-
-### 根因分析
-...
-### 时间线
-...
-### 影响范围
-...
-### 修复建议
-1. ...
-2. ..."
-
-# 行为准则
-- 先计划再执行，不要跳过计划阶段
-- 每轮至少使用一种工具获取信息
-- 所有判断基于工具返回的实际数据
-- 最终报告前必须完成所有排查步骤`
-
 type AIOpsService struct {
 	store          *store.ConversationStore
 	baseModel      model.BaseChatModel
 	toolModel      model.ToolCallingChatModel
 	tools          []tool.BaseTool
-	skills         *skills_registry.SkillRegistry
 	compactTrigger *contexttool.CompactTrigger
 	perms          *permission.PermissionManager
 }
 
-func NewAIOpsService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore, skills *skills_registry.SkillRegistry) *AIOpsService {
+func NewAIOpsService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore) *AIOpsService {
 	compactTrigger := toolHandler.CompactTrigger
 	maxTokens := cfg.GetConfig().Llm.MaxTokens
 	chatModel, err := openai.NewChatModel(context.Background(), &openai.ChatModelConfig{
@@ -109,7 +66,6 @@ func NewAIOpsService(toolHandler *tools.ToolHandler, convStore *store.Conversati
 		baseModel:      chatModel,
 		toolModel:      toolModel,
 		tools:          tools_,
-		skills:         skills,
 		compactTrigger: compactTrigger,
 		perms:          permission.NewPermissionManager(permission.ModeDefault),
 	}
@@ -124,11 +80,10 @@ func (s *AIOpsService) Diagnose(ctx context.Context,
 		history = nil
 	}
 
-	systemPrompt := aiopsInstruction
-	if desc := s.skills.DescribeAvailable(); desc != "" {
-		systemPrompt += "\n\n# 已安装的 Agent Skills（技能模块）\n" + desc + "\n以上是系统预装的技能模块，不是你的通用能力。当用户提到某个技能相关的需求时，调用 skill 工具（传入技能名称）来加载该技能的完整规则，然后按规则执行。"
-	}
-	messages := []*schema.Message{schema.SystemMessage(systemPrompt)}
+	b := prompt.NewBuilder()
+	b.Add(prompt.AIOpsCoreBlock())
+	b.Add(prompt.ToolsRuleBlock())
+	messages := []*schema.Message{schema.SystemMessage(b.Build())}
 	messages = append(messages, history...)
 	messages = append(messages, schema.UserMessage(message))
 
