@@ -21,33 +21,33 @@ export function simulateSSE(
       { type: 'tool_call', name: 'health_check', args: '{}' },
       { type: 'tool_result', name: 'health_check', result: '{"cpu_utilization": 87, "memory_utilization": 92, "disk_status": "OK", "prometheus_up": true}' },
       { type: 'tool_call', name: 'bash', args: '{"command": "df -h"}' },
-      { type: 'tool_result', name: 'bash', result: 'Filesystem      Size  Used Avail Use% Mounted on
-/dev/sda1        40G   14G   26G  33% /' },
-      { type: 'content', content: '### 🩺 诊断分析结果
+      { type: 'tool_result', name: 'bash', result: `Filesystem      Size  Used Avail Use% Mounted on
+/dev/sda1        40G   14G   26G  33% /` },
+      { type: 'content', content: `### 🩺 诊断分析结果
 
 经过对系统底层指标的综合调用与审计排查，我定位到了以下异常：
 
 1. **内存水位偏高 (92%)**：检测到主要由日志检索缓存进程占用引起。
 2. **存储空间正常**：磁盘根目录挂载健康，余量为 26GB。
 
-**建议行动**：一键清理系统的 Redis 脏缓存或重启 log-collector 容器。' }
+**建议行动**：一键清理系统的 Redis 脏缓存或重启 log-collector 容器。` }
     )
   } else if (userText.includes('手册') || userText.includes('知识库') || userText.includes('RAG')) {
     events.push(
       { type: 'tool_call', name: 'knowledge_search', args: JSON.stringify({ query: userText }) },
       { type: 'tool_result', name: 'knowledge_search', result: '根据《运维故障排查黄金手册》第12条：在内存超过90%时，优先检索 /var/log。' },
-      { type: 'content', content: '根据本地 RAG 知识库的最佳实践建议：
+      { type: 'content', content: `根据本地 RAG 知识库的最佳实践建议：
 
-- 您应当通过 	ools/file_tools.go 定位日志异常，并在 MonitorDrawer 中保持观测。' }
+- 您应当通过 tools/file_tools.go 定位日志异常，并在 MonitorDrawer 中保持观测。` }
     )
   } else {
     // 常规智能聊天
     events.push(
-      { type: 'content', content: 您好！我是您的 **GoAgent (MiniAgent) 智能运维助理**。
+      { type: 'content', content: `您好！我是您的 **GoAgent (MiniAgent) 智能运维助理**。
 
-您刚才提问了：*""*
+您刚才提问了：*"${userText}"*
 
-作为面向用户最友好的 Cherry Studio 风格工作站，我不仅支持常规的**流式多轮问答**，还能自动分析并折叠工具日志。您可以点击右侧的 **🖥️ 实时系统状态** 面板，时刻掌控服务指标！ }
+作为面向用户最友好的 Cherry Studio 风格工作站，我不仅支持常规的**流式多轮问答**，还能自动分析并折叠工具日志。您可以点击右侧的 **🖥️ 实时系统状态** 面板，时刻掌控服务指标！` }
     )
   }
 
