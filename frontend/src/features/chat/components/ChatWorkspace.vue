@@ -138,7 +138,7 @@ watch(() => props.conversationId, () => {
   if (activeAbort) activeAbort.abort()
   isSending.value = false
   messages.value = [
-    { id: Date.now(), role: 'assistant', content: 已切换至会话: 。我随时准备为您进行运维诊断和日常知识手册查阅！ }
+    { id: Date.now(), role: 'assistant', content: '已切换至会话: ' + props.conversationId + '。我随时准备为您进行运维诊断和日常知识手册查阅！' }
   ]
 })
 </script>
