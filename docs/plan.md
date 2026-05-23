@@ -1,4 +1,5 @@
-# GoAgent — 项目文档
+﻿# GoAgent — 项目文档
+*(注：真实 Go Module 命名及内部代码包名已统一为 github.com/LennyFace24/MiniAgent)*
 
 ## 1. 项目概述
 
@@ -127,6 +128,9 @@ data: "done"
 ```
 
 **行为：** 异步流式，LLM 每生成一个 token 立即推送。最多 20 轮工具调用，每 5 轮未调用 todo 工具则注入提醒。超时 120s。
+
+⚠️ **[注意]** 虽然代码编写了 `todo_tool.go`，但当前版本在 `tool_handler.go` 中 *未完成注册集成*。因为 AI 无法调用，这会导致它在多轮对话时必定反复触发系统追加的 `[系统提醒] 你已经连续多轮未更新待办事项` 的死循环提醒。这已被作为遗留缺陷记录在案。
+
 
 ---
 
@@ -465,7 +469,7 @@ GoAgent/
 | 文档上传 → 分片 → 向量化 → 入库 | `POST /upload_file` | Markdown Header Splitter + OpenAI Embedding + ChromaDB |
 | 文档语义检索 | `POST /search` | Embedding 向量化 + ChromaDB 相似度搜索 |
 | 流式智能问答 (SSE + ReAct) | `POST /chat_stream` | Stream Copy(2) 分流，max 20 轮，todo 提醒机制 |
-| 非流式问答 (ReAct) | `POST /chat` | 同步 Generate，完整响应一次性返回 |
+| 非流式问答 (ReAct) | `POST /chat` | *(待实现/已废弃)* 当前版本后端实际未注册该路由，仅支持流式 `/chat_stream` |
 | AIOps 智能诊断 (SSE) | `POST /ai_ops` | Planner-Executor-Replanner，复用 chat 编排逻辑 |
 | 多对话管理 API | `GET/POST/DELETE /conversation(s)` | 创建/列表/查看/删除对话，ConversationMeta 元数据 |
 | 多对话持久化 | `store/conversation.go` | JSONL 多对话，session_id/conversation_id 二级目录 |
@@ -475,7 +479,7 @@ GoAgent/
 | 文件读写编辑工具 | `tools/file_tools.go` | read_file / write_file / edit_file，路径安全校验 |
 | health_check 真实实现 | `tools/diagnostic_tool.go` | Prometheus HTTP API 查询 CPU/内存/磁盘/负载/up 指标 |
 | knowledge_search | `tools/knowledge_tool.go` | ChromaDB 语义检索 |
-| 待办事项工具 | `tools/todo_tool.go` | write_todo / read_todo，Markdown 文档格式 |
+| 待办事项工具 | `tools/todo_tool.go` | *(代码已实现，未注册)* 暂未在 `tool_handler.go` 中集成装配，会导致流式中多轮未调用注入的 todo 提示产生逻辑死锁 |
 | Vue 3 前端 | `frontend/` | 多对话侧边栏、Markdown 渲染、SSE 流式、可拖拽侧边栏、深浅色主题 |
 | Docker 部署 | `docker-compose.yml` | 一键部署：frontend + backend + chromadb + prometheus |
 | Prometheus 集成 | `prometheus.yml` + node_exporter | 真实系统指标采集，供 health_check 查询 |

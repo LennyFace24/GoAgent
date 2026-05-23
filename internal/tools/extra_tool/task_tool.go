@@ -14,14 +14,14 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-type Task struct{}
+type SubProxy struct{}
 
-type TaskInput struct {
+type SubProxyInput struct {
 	SystemInstruction string `json:"system_instruction" description:"Instructions for the subtask execution context." required:"true"`
 	Content           string `json:"content" description:"The content of the task to be executed." required:"true"`
 }
 
-func runSubAggent(ctx context.Context, content TaskInput) string {
+func runSubAggent(ctx context.Context, content SubProxyInput) string {
 	cfg := config.GetConfig()
 	chatmodel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
 		Model:     cfg.Llm.Model,
@@ -104,11 +104,11 @@ func executeTool(ctx context.Context, tc schema.ToolCall, toolMap map[string]too
 	return t.InvokableRun(ctx, tc.Function.Arguments)
 }
 
-func NewTaskTool() (tool.InvokableTool, error) {
+func NewSubProxyTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
-		"task",
+		"subproxy",
 		"Run a subtask in a clean context and return a summary.",
-		func(ctx context.Context, input TaskInput) (string, error) {
+		func(ctx context.Context, input SubProxyInput) (string, error) {
 			return runSubAggent(ctx, input), nil
 		},
 	)

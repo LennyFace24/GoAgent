@@ -47,9 +47,9 @@ func NewToolHandler(fileSearcher extratool.FileSearcher) (*ToolHandler, error) {
 	if err != nil {
 		return nil, fmt.Errorf("创建 edit_file 工具失败: %w", err)
 	}
-	taskTool, err := extratool.NewTaskTool()
+	subProxyTool, err := extratool.NewSubProxyTool()
 	if err != nil {
-		return nil, fmt.Errorf("创建 task 工具失败: %w", err)
+		return nil, fmt.Errorf("创建 subproxy 工具失败: %w", err)
 	}
 
 	compactTool, compactTrigger, err := contexttool.NewCompactTool()
@@ -65,7 +65,7 @@ func NewToolHandler(fileSearcher extratool.FileSearcher) (*ToolHandler, error) {
 			editFileTool,
 			healthCheckTool,
 			knowledgeTool,
-			taskTool,
+			subProxyTool,
 			compactTool,
 		},
 		CompactTrigger: compactTrigger,
