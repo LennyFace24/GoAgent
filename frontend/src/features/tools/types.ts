@@ -17,11 +17,16 @@ export interface MetricsData {
   mem_total_gb?: number
   mem_used_gb?: number
   disk?: number
+  disk_io_util?: number
+  inode_use?: number
+  swap_use?: number
   load1m?: number
   load5m?: number
   load15m?: number
   network_rx?: number
   network_tx?: number
+  tcp_tw?: number
+  oom_kills_1h?: number
   up_count: number
   down_count: number
   targets?: TargetState[]
