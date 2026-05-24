@@ -36,8 +36,21 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+
+  # node_exporter:
+  #   image: prom/node-exporter:latest
+  #   restart: unless-stopped
+  #   ports:
+  #     - "9100:9100"
+  #   pid: host
+  #   volumes:
+  #     - /proc:/host/proc:ro
+  #     - /sys:/host/sys:ro
+  #     - /:/rootfs:ro
+  #   command:
+  #     - '--path.procfs=/host/proc'
+  #     - '--path.sysfs=/host/sys'
+  #     - '--path.rootfs=/rootfs'
 
 volumes:
   goagent-data:
