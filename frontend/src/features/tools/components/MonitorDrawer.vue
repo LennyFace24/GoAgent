@@ -109,9 +109,6 @@ onUnmounted(() => {
             <div class="bar-fill" :style="{ width: (data.cpu ?? 0) + '%' }" :class="{ warning: (data.cpu ?? 0) > 80 }">
             </div>
           </div>
-          <div v-if="data.cpu_freq_mhz" class="metric-sub">
-            最大频率 {{ data.cpu_freq_mhz.toFixed(0) }} MHz
-          </div>
         </div>
 
         <!-- 内存使用率 -->

@@ -8,13 +8,12 @@ import (
 )
 
 type MetricsResponse struct {
-	Status      string             `json:"status"`
-	CPU         *float64           `json:"cpu,omitempty"`
-	CPUFreqMHz  *float64           `json:"cpu_freq_mhz,omitempty"`
-	Memory      *float64           `json:"memory,omitempty"`
-	MemTotalGB  *float64           `json:"mem_total_gb,omitempty"`
-	MemUsedGB   *float64           `json:"mem_used_gb,omitempty"`
-	Disk        *float64           `json:"disk,omitempty"`
+	Status     string             `json:"status"`
+	CPU        *float64           `json:"cpu,omitempty"`
+	Memory     *float64           `json:"memory,omitempty"`
+	MemTotalGB *float64           `json:"mem_total_gb,omitempty"`
+	MemUsedGB  *float64           `json:"mem_used_gb,omitempty"`
+	Disk       *float64           `json:"disk,omitempty"`
 	Load1m      *float64           `json:"load1m,omitempty"`
 	Load5m      *float64           `json:"load5m,omitempty"`
 	Load15m     *float64           `json:"load15m,omitempty"`
@@ -46,11 +45,10 @@ func (h *MetricsHandler) GetMetrics(c *gin.Context) {
 	resp := MetricsResponse{Status: "ok"}
 
 	resp.CPU = round1(h.pc.InstantQuery(`100 - (avg(rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)`))
-	resp.CPUFreqMHz = round1(h.pc.InstantQuery(`avg(node_cpu_frequency_max_hertz) / 1e6`))
 	resp.Memory = round1(h.pc.InstantQuery(`(1 - node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100`))
 	resp.MemTotalGB = round1(h.pc.InstantQuery(`node_memory_MemTotal_bytes / 1e9`))
 	resp.MemUsedGB = round1(h.pc.InstantQuery(`(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / 1e9`))
-	resp.Disk = round1(h.pc.InstantQuery(`(1 - node_filesystem_avail_bytes{mountpoint="/",fstype!="tmpfs"} / node_filesystem_size_bytes{mountpoint="/",fstype!="tmpfs"}) * 100`))
+	resp.Disk = round1(h.pc.InstantQuery(`(1 - node_filesystem_avail_bytes{fstype!~"tmpfs|squashfs|overlay|fuse.*"} / node_filesystem_size_bytes{fstype!~"tmpfs|squashfs|overlay|fuse.*"}) * 100`))
 	resp.Load1m = round1(h.pc.InstantQuery(`node_load1`))
 	resp.Load5m = round1(h.pc.InstantQuery(`node_load5`))
 	resp.Load15m = round1(h.pc.InstantQuery(`node_load15`))
