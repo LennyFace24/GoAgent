@@ -1,6 +1,5 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, watch, onMounted, nextTick } from 'vue'
-import { simulateSSE } from '../../../shared/mockSSE'
 
 const props = defineProps<{
   mode: string
@@ -13,21 +12,39 @@ const emit = defineEmits<{
   'update:isMonitorOpen': [value: boolean]
 }>()
 
+interface ToolCall {
+  function: { name: string; arguments: string }
+  id: string
+}
+
+interface ApiMessage {
+  role: string
+  content: string
+  tool_calls?: ToolCall[]
+  tool_name?: string
+  tool_call_id?: string
+}
+
 interface Message {
   id: number
-  role: 'user' | 'assistant' | 'tool_call' | 'tool_result'
+  role: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'permission_req'
   content?: string
   name?: string
   args?: string
   result?: string
+  callId?: string
+  requestId?: string
+  reason?: string
   isThinking?: boolean
+  responded?: boolean
 }
 
 const messages = ref<Message[]>([])
 const inputText = ref('')
 const isSending = ref(false)
 const msgArea = ref<HTMLElement | null>(null)
-let activeAbort: any = null
+let activeAbort: AbortController | null = null
+let orderCounter = 0
 
 function scrollToBottom() {
   nextTick(() => {
@@ -37,10 +54,77 @@ function scrollToBottom() {
   })
 }
 
-// 快捷卡片一键填充发送
 function triggerQuickAction(text: string) {
   inputText.value = text
   handleSend()
+}
+
+// 从后端加载对话历史
+async function loadHistory() {
+  messages.value = []
+  orderCounter = 0
+  try {
+    const res = await fetch(`/conversation/${props.conversationId}`)
+    if (!res.ok) {
+      messages.value.push({
+        id: Date.now(),
+        role: 'assistant',
+        content: '您好，我是您的智能运维助手！您可以输入问题进行分析，或者点击右上角查看 🖥️ 实时系统状态 面板。'
+      })
+      return
+    }
+    const data = await res.json()
+    const lines: ApiMessage[] = data.messages || []
+    for (const line of lines) {
+      if (line.role === 'user') {
+        messages.value.push({
+          id: Date.now() + Math.random(),
+          role: 'user',
+          content: line.content,
+        })
+      } else if (line.role === 'assistant') {
+        if (line.tool_calls) {
+          for (const tc of line.tool_calls) {
+            messages.value.push({
+              id: Date.now() + Math.random(),
+              role: 'tool_call',
+              name: tc.function.name,
+              args: tc.function.arguments,
+              callId: tc.id,
+            })
+          }
+        }
+        if (line.content) {
+          messages.value.push({
+            id: Date.now() + Math.random(),
+            role: 'assistant',
+            content: line.content,
+          })
+        }
+      } else if (line.role === 'tool') {
+        messages.value.push({
+          id: Date.now() + Math.random(),
+          role: 'tool_result',
+          name: line.tool_name || '',
+          result: line.content,
+          callId: line.tool_call_id || '',
+        })
+      }
+    }
+    if (messages.value.length === 0) {
+      messages.value.push({
+        id: Date.now(),
+        role: 'assistant',
+        content: '您好，我是您的智能运维助手！您可以输入问题进行分析，或者点击右上角查看 🖥️ 实时系统状态 面板。'
+      })
+    }
+  } catch {
+    messages.value.push({
+      id: Date.now(),
+      role: 'assistant',
+      content: '您好，我是您的智能运维助手！您可以输入问题进行分析，或者点击右上角查看 🖥️ 实时系统状态 面板。'
+    })
+  }
 }
 
 async function handleSend() {
@@ -48,8 +132,7 @@ async function handleSend() {
 
   const userText = inputText.value
   inputText.value = ''
-  
-  // 1. 压入用户消息
+
   messages.value.push({
     id: Date.now(),
     role: 'user',
@@ -59,7 +142,6 @@ async function handleSend() {
 
   isSending.value = true
 
-  // 2. 压入 AI 思考占位消息
   const aiMessageId = Date.now() + 1
   messages.value.push({
     id: aiMessageId,
@@ -69,107 +151,199 @@ async function handleSend() {
   })
   scrollToBottom()
 
-  // 3. 执行 SSE 流
-  try {
-    // 优先尝试连通真实后端
-    let realSseWorked = false
-    
-    // 如果失败或脱机，自动切换到我们的保真 Mock 调试引擎中
-    if (!realSseWorked) {
-      activeAbort = simulateSSE(
-        userText,
-        props.mode,
-        (event) => {
-          // 移除思考占位
-          const aiMsg = messages.value.find(m => m.id === aiMessageId)
-          if (aiMsg) aiMsg.isThinking = false
+  const abortCtrl = new AbortController()
+  activeAbort = abortCtrl
 
-          if (event.type === 'tool_call') {
-            messages.value.push({
-              id: Date.now() + Math.random(),
-              role: 'tool_call',
-              name: event.name,
-              args: event.args
-            })
-          } else if (event.type === 'tool_result') {
-            messages.value.push({
-              id: Date.now() + Math.random(),
-              role: 'tool_result',
-              name: event.name,
-              result: event.result
-            })
-          } else if (event.type === 'content') {
-            const lastMsg = messages.value[messages.value.length - 1]
-            if (lastMsg && lastMsg.role === 'assistant') {
-              lastMsg.content = (lastMsg.content || '') + event.content
-            } else {
+  try {
+    const endpoint = props.mode === 'aiops' ? '/ai_ops' : '/chat_stream'
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: userText, conversation_id: props.conversationId }),
+      signal: abortCtrl.signal,
+    })
+
+    if (!res.ok) {
+      const aiMsg = messages.value.find(m => m.id === aiMessageId)
+      if (aiMsg) {
+        aiMsg.isThinking = false
+        aiMsg.content = `[HTTP ${res.status}] 请求失败`
+      }
+      return
+    }
+
+    const reader = res.body!.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+
+    while (true) {
+      if (abortCtrl.signal.aborted) {
+        reader.cancel()
+        break
+      }
+
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      let currentEvent = ''
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i]
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trim()
+          continue
+        }
+        if (!line.startsWith('data:')) continue
+        const payload = line.slice(5).trim()
+        if (!payload) continue
+
+        if (currentEvent === 'delta') {
+          try {
+            const data = JSON.parse(payload)
+            const aiMsg = messages.value.find(m => m.id === aiMessageId)
+            if (aiMsg && data.content) {
+              aiMsg.isThinking = false
+              aiMsg.content = (aiMsg.content || '') + data.content
+            }
+          } catch { /* ignore */ }
+          scrollToBottom()
+
+        } else if (currentEvent === 'message') {
+          try {
+            const data = JSON.parse(payload)
+            const aiMsg = messages.value.find(m => m.id === aiMessageId)
+            if (aiMsg && data.content) {
+              aiMsg.isThinking = false
+              aiMsg.content = data.content
+            }
+          } catch { /* ignore */ }
+          scrollToBottom()
+
+        } else if (currentEvent === 'tool') {
+          try {
+            const ev = JSON.parse(payload)
+            if (ev.type === 'tool_call') {
+              const aiMsg = messages.value.find(m => m.id === aiMessageId)
+              if (aiMsg) aiMsg.isThinking = false
+
               messages.value.push({
                 id: Date.now() + Math.random(),
-                role: 'assistant',
-                content: event.content
+                role: 'tool_call',
+                name: ev.name,
+                args: ev.args,
+                callId: ev.call_id,
+              })
+            } else if (ev.type === 'tool_result') {
+              messages.value.push({
+                id: Date.now() + Math.random(),
+                role: 'tool_result',
+                name: ev.name,
+                result: ev.result,
+                callId: ev.call_id,
+              })
+            } else if (ev.type === 'permission_request') {
+              messages.value.push({
+                id: Date.now() + Math.random(),
+                role: 'permission_req',
+                name: ev.name,
+                args: ev.args,
+                requestId: ev.request_id,
+                reason: ev.reason,
+                callId: ev.call_id,
+                responded: false,
               })
             }
-          }
+          } catch { /* ignore */ }
           scrollToBottom()
-        },
-        () => {
-          isSending.value = false
+
+        } else if (currentEvent === 'done') {
+          const aiMsg = messages.value.find(m => m.id === aiMessageId)
+          if (aiMsg) aiMsg.isThinking = false
+        } else if (currentEvent === 'error') {
+          try {
+            const data = JSON.parse(payload)
+            const aiMsg = messages.value.find(m => m.id === aiMessageId)
+            if (aiMsg) {
+              aiMsg.isThinking = false
+              aiMsg.content = (aiMsg.content || '') + `\n\n[错误: ${data.error}]`
+            }
+          } catch { /* ignore */ }
         }
-      )
+      }
     }
-  } catch {
+  } catch (e) {
+    if (abortCtrl.signal.aborted) return
+    const aiMsg = messages.value.find(m => m.id === aiMessageId)
+    if (aiMsg) {
+      aiMsg.isThinking = false
+      aiMsg.content = (aiMsg.content || '') + `\n\n[连接断开: ${e instanceof Error ? e.message : String(e)}]`
+    }
+  } finally {
+    if (!abortCtrl.signal.aborted) {
+      const aiMsg = messages.value.find(m => m.id === aiMessageId)
+      if (aiMsg) aiMsg.isThinking = false
+    }
+    if (activeAbort === abortCtrl) {
+      activeAbort = null
+    }
     isSending.value = false
   }
 }
 
-// 可折叠工具栏状态记录
+async function respondPermission(msg: Message, approved: boolean) {
+  if (msg.role !== 'permission_req' || !msg.requestId) return
+  msg.responded = true
+  try {
+    await fetch('/permission/response', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ id: msg.requestId, approved }),
+    })
+  } catch { /* ignore */ }
+}
+
 const expandedTools = ref<Record<number, boolean>>({})
 function toggleTool(index: number) {
   expandedTools.value[index] = !expandedTools.value[index]
 }
 
 onMounted(() => {
-  messages.value = [
-    { id: 1, role: 'assistant', content: '您好，我是您的智能运维助手！您可以输入问题进行分析，或者点击右上角查看 **🖥️ 实时系统状态** 面板。' }
-  ]
+  loadHistory()
 })
 
 watch(() => props.conversationId, () => {
   if (activeAbort) activeAbort.abort()
   isSending.value = false
-  messages.value = [
-    { id: Date.now(), role: 'assistant', content: '已切换至会话: ' + props.conversationId + '。我随时准备为您进行运维诊断和日常知识手册查阅！' }
-  ]
+  loadHistory()
 })
 </script>
 
 <template>
   <div class="chat-workspace">
-    <!-- Header 顶栏 -->
     <div class="workspace-header">
       <div class="header-info">
-        <span class="active-title">🎯 运维控制台</span>
-        <span class="model-badge">GPT-4 (GoAgent Copilot)</span>
+        <span class="active-title">运维控制台</span>
+        <span class="model-badge">GoAgent Copilot</span>
       </div>
-      <button 
+      <button
         class="monitor-toggle-btn"
         :class="{ active: isMonitorOpen }"
         @click="emit('update:isMonitorOpen', !isMonitorOpen)"
       >
-        🖥️ 实时系统状态
+        实时系统状态
       </button>
     </div>
 
-    <!-- 消息区域 -->
     <div class="message-area" ref="msgArea">
       <div v-for="(msg, index) in messages" :key="msg.id" class="message-row">
-        
-        <!-- 用户气泡 -->
+
         <div v-if="msg.role === 'user'" class="bubble user">
           {{ msg.content }}
         </div>
 
-        <!-- AI 助理气泡 -->
         <div v-else-if="msg.role === 'assistant'" class="bubble assistant">
           <div v-if="msg.isThinking" class="thinking-loader">
             <span class="loader-dot"></span>
@@ -182,11 +356,10 @@ watch(() => props.conversationId, () => {
           </div>
         </div>
 
-        <!-- Tool Call (折叠工具条，极致友好体验) -->
         <div v-else-if="msg.role === 'tool_call'" class="toolchain-block">
           <div class="toolchain-header" @click="toggleTool(index)">
             <span class="tool-status-icon">⚙️</span>
-            <span class="tool-summary">AI 正在调度底层工具: <strong>{{ msg.name }}</strong></span>
+            <span class="tool-summary">AI 正在调度工具: <strong>{{ msg.name }}</strong></span>
             <span class="accordion-arrow">{{ expandedTools[index] ? '▲' : '▼' }}</span>
           </div>
           <div v-if="expandedTools[index]" class="toolchain-detail">
@@ -194,11 +367,10 @@ watch(() => props.conversationId, () => {
           </div>
         </div>
 
-        <!-- Tool Result (折叠工具结果) -->
         <div v-else-if="msg.role === 'tool_result'" class="toolchain-block result">
           <div class="toolchain-header" @click="toggleTool(index)">
             <span class="tool-status-icon success">✅</span>
-            <span class="tool-summary">工具 <strong>{{ msg.name }}</strong> 调用成果已载入</span>
+            <span class="tool-summary">工具 <strong>{{ msg.name }}</strong> 执行完成</span>
             <span class="accordion-arrow">{{ expandedTools[index] ? '▲' : '▼' }}</span>
           </div>
           <div v-if="expandedTools[index]" class="toolchain-detail">
@@ -206,12 +378,24 @@ watch(() => props.conversationId, () => {
           </div>
         </div>
 
+        <div v-else-if="msg.role === 'permission_req'" class="permission-card">
+          <div class="perm-header">
+            <span class="perm-icon">🔐</span>
+            <span>工具 <strong>{{ msg.name }}</strong> 请求授权</span>
+          </div>
+          <div v-if="msg.reason" class="perm-reason">{{ msg.reason }}</div>
+          <pre v-if="msg.args" class="code-pre perm-args">参数: {{ msg.args }}</pre>
+          <div v-if="!msg.responded" class="perm-actions">
+            <button class="perm-btn approve" @click="respondPermission(msg, true)">批准</button>
+            <button class="perm-btn deny" @click="respondPermission(msg, false)">拒绝</button>
+          </div>
+          <div v-else class="perm-status">已{{ msg.approved ? '批准' : '拒绝' }}</div>
+        </div>
+
       </div>
     </div>
 
-    <!-- 底部输入栏 -->
     <div class="input-section">
-      <!-- 快捷运维助手卡片 -->
       <div v-if="messages.length <= 1" class="quick-actions">
         <button class="quick-btn" @click="triggerQuickAction('🩺 一键全盘健康诊断')">
           🩺 一键全盘健康诊断
@@ -224,9 +408,8 @@ watch(() => props.conversationId, () => {
         </button>
       </div>
 
-      <!-- 输入框主体 -->
       <div class="input-container">
-        <textarea 
+        <textarea
           v-model="inputText"
           @keydown.enter.prevent="handleSend"
           placeholder="向 AI 助理提问或下达运维诊断指令... (Enter 发送)"
@@ -301,7 +484,6 @@ watch(() => props.conversationId, () => {
   border-color: var(--accent);
 }
 
-/* 消息滚动区域 */
 .message-area {
   flex: 1;
   padding: 24px 40px;
@@ -316,7 +498,6 @@ watch(() => props.conversationId, () => {
   flex-direction: column;
 }
 
-/* 扁平无边框气泡 */
 .bubble {
   max-width: 80%;
   padding: 12px 18px;
@@ -343,7 +524,6 @@ watch(() => props.conversationId, () => {
   box-shadow: var(--shadow-sm);
 }
 
-/* 思考中加载状态 */
 .thinking-loader {
   display: flex;
   gap: 4px;
@@ -376,7 +556,6 @@ watch(() => props.conversationId, () => {
   50% { color: var(--accent) }
 }
 
-/* 折叠式工具条 */
 .toolchain-block {
   align-self: flex-start;
   width: 100%;
@@ -434,7 +613,83 @@ watch(() => props.conversationId, () => {
   margin: 0;
 }
 
-/* 底部输入框 */
+/* 权限确认卡片 */
+.permission-card {
+  align-self: flex-start;
+  width: 100%;
+  max-width: 500px;
+  background: rgba(255, 193, 7, 0.06);
+  border: 1px solid rgba(255, 193, 7, 0.3);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  margin: 6px 0;
+}
+
+.perm-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.perm-icon {
+  font-size: 1.1rem;
+}
+
+.perm-reason {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  margin-bottom: 8px;
+}
+
+.perm-args {
+  margin-bottom: 10px;
+  font-size: 0.72rem;
+  opacity: 0.8;
+}
+
+.perm-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.perm-btn {
+  padding: 6px 16px;
+  border-radius: var(--radius-sm);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: var(--transition-fast);
+}
+
+.perm-btn.approve {
+  background: var(--accent);
+  color: white;
+}
+
+.perm-btn.approve:hover {
+  background: var(--accent-light);
+}
+
+.perm-btn.deny {
+  background: transparent;
+  color: var(--text-secondary);
+  border: 1px solid var(--border-color);
+}
+
+.perm-btn.deny:hover {
+  border-color: #e53e3e;
+  color: #e53e3e;
+}
+
+.perm-status {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
 .input-section {
   padding: 16px 40px 24px 40px;
   display: flex;
