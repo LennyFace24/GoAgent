@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/LennyFace24/MiniAgent/internal/config"
 	"github.com/LennyFace24/MiniAgent/internal/service"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
@@ -13,6 +14,7 @@ var (
 	fileHandler         *FileHandler
 	toolsHandler        *tools.ToolHandler
 	conversationHandler *ConversationHandler
+	metricsHandler      *MetricsHandler
 
 	convStore *store.ConversationStore
 )
@@ -37,6 +39,7 @@ func SetupHandler(r *gin.Engine) {
 		service.NewAIOpsService(toolsHandler, convStore))
 	fileHandler = NewFileHandler(fileService)
 	conversationHandler = NewConversationHandler(convStore)
+	metricsHandler = NewMetricsHandler(config.GetConfig().Prometheus.URL)
 }
 
 func SetupRoutes(r *gin.Engine) {
@@ -48,6 +51,8 @@ func SetupRoutes(r *gin.Engine) {
 	r.POST("/search", fileHandler.Search)
 	// AIOps接口
 	r.POST("/ai_ops", aiopsHandler.Diagnose)
+	// 系统监控指标接口
+	r.GET("/api/metrics", metricsHandler.GetMetrics)
 	// 权限确认接口
 	r.POST("/permission/response", chatStreamHandler.PermissionResponse)
 	// 对话管理接口

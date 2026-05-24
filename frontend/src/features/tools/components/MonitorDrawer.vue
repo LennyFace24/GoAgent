@@ -1,5 +1,5 @@
-﻿<script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 
 const props = defineProps<{
   isOpen: boolean
@@ -9,24 +9,69 @@ const emit = defineEmits<{
   'close': []
 }>()
 
-const cpu = ref(42)
-const memory = ref(58)
-const disk = ref(33)
-const network = ref(1.2)
-const activeUsers = ref(3)
-
-let intervalId: any = null
-
-function fetchStats() {
-  // 如果后端有 health_check 服务，本可读取。
-  // 在此我们引入动态模拟引擎，让数值温润跳动，呈现极为真实的监控效果。
-  cpu.value = Math.max(15, Math.min(95, Math.floor(cpu.value + (Math.random() - 0.5) * 8)))
-  memory.value = Math.max(30, Math.min(90, Math.floor(memory.value + (Math.random() - 0.5) * 2)))
-  network.value = Math.max(0.1, parseFloat((network.value + (Math.random() - 0.5) * 0.4).toFixed(1)))
+interface TargetState {
+  job: string
+  instance: string
+  up: boolean
 }
 
-onMounted(() => {
-  intervalId = setInterval(fetchStats, 2000)
+interface MetricsData {
+  status: string
+  cpu?: number
+  memory?: number
+  disk?: number
+  load1m?: number
+  load5m?: number
+  load15m?: number
+  network_rx?: number
+  network_tx?: number
+  up_count: number
+  down_count: number
+  targets?: TargetState[]
+  error?: string
+}
+
+const data = ref<MetricsData | null>(null)
+const loading = ref(false)
+const error = ref('')
+let intervalId: ReturnType<typeof setInterval> | null = null
+
+async function fetchMetrics() {
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await fetch('/api/metrics')
+    if (!res.ok) {
+      error.value = `HTTP ${res.status}`
+      data.value = null
+      return
+    }
+    const json: MetricsData = await res.json()
+    if (json.status === 'error') {
+      error.value = json.error || '未知错误'
+      data.value = null
+      return
+    }
+    data.value = json
+    error.value = ''
+  } catch (e) {
+    error.value = 'Prometheus 连接不上'
+    data.value = null
+  } finally {
+    loading.value = false
+  }
+}
+
+watch(() => props.isOpen, (open) => {
+  if (open) {
+    fetchMetrics()
+    intervalId = setInterval(fetchMetrics, 5000)
+  } else {
+    if (intervalId) {
+      clearInterval(intervalId)
+      intervalId = null
+    }
+  }
 })
 
 onUnmounted(() => {
@@ -42,94 +87,134 @@ onUnmounted(() => {
     </div>
 
     <div class="drawer-content">
-      <!-- 运行时间卡片 -->
-      <div class="status-card">
-        <span class="card-title">系统运行状态</span>
+      <!-- 连接不上 -->
+      <div v-if="error" class="status-card error">
         <div class="indicator-group">
-          <span class="status-dot green"></span>
-          <span class="status-text">全系统运行正常 (UP)</span>
+          <span class="status-dot red"></span>
+          <span class="status-text">{{ error }}</span>
         </div>
       </div>
 
-      <!-- CPU 环形或进度 -->
-      <div class="metric-card">
-        <div class="metric-header">
-          <span>CPU 使用率</span>
-          <span class="metric-val">{{ cpu }}%</span>
-        </div>
-        <div class="bar-bg">
-          <div class="bar-fill" :style="{ width: cpu + '%' }" :class="{ warning: cpu > 80 }"></div>
+      <!-- 首次加载中 -->
+      <div v-else-if="loading && !data" class="status-card">
+        <div class="indicator-group">
+          <span class="status-dot"></span>
+          <span class="status-text">正在连接 Prometheus...</span>
         </div>
       </div>
 
-      <!-- 内存 -->
-      <div class="metric-card">
-        <div class="metric-header">
-          <span>内存使用率</span>
-          <span class="metric-val">{{ memory }}%</span>
-        </div>
-        <div class="bar-bg">
-          <div class="bar-fill" :style="{ width: memory + '%' }"></div>
-        </div>
-      </div>
-
-      <!-- 磁盘 -->
-      <div class="metric-card">
-        <div class="metric-header">
-          <span>存储空间</span>
-          <span class="metric-val">{{ disk }}%</span>
-        </div>
-        <div class="bar-bg">
-          <div class="bar-fill" :style="{ width: disk + '%' }"></div>
-        </div>
-      </div>
-
-      <!-- 网络负载 -->
-      <div class="stats-row">
-        <div class="mini-card">
-          <span class="mini-label">网络吞吐</span>
-          <span class="mini-val">{{ network }} Mb/s</span>
-        </div>
-        <div class="mini-card">
-          <span class="mini-label">活跃 OnCall</span>
-          <span class="mini-val">{{ activeUsers }} 人</span>
-        </div>
-      </div>
-
-      <!-- 警告或报警历史 -->
-      <div class="alerts-section">
-        <span class="section-title">今日告警历史</span>
-        <div class="alerts-list">
-          <div class="alert-item warn">
-            <span class="alert-icon">⚠️</span>
-            <div class="alert-body">
-              <span class="alert-desc">Prometheus 采集异常波折</span>
-              <span class="alert-time">10:42:15</span>
-            </div>
+      <!-- 真实数据 -->
+      <template v-else-if="data">
+        <!-- 系统运行状态 -->
+        <div class="status-card" :class="data.down_count > 0 ? 'warn' : 'ok'">
+          <span class="card-title">系统运行状态</span>
+          <div class="indicator-group">
+            <span class="status-dot" :class="data.down_count > 0 ? 'yellow' : 'green'"></span>
+            <span class="status-text">
+              {{ data.down_count > 0 ? `${data.down_count} 个目标离线` : '全系统运行正常 (UP)' }}
+            </span>
           </div>
-          <div class="alert-item success">
-            <span class="alert-icon">✅</span>
-            <div class="alert-body">
-              <span class="alert-desc">ChromaDB 索引自动重建完毕</span>
-              <span class="alert-time">09:15:00</span>
-            </div>
+          <div class="target-counts">
+            <span class="up-label">{{ data.up_count }} UP</span>
+            <span v-if="data.down_count > 0" class="down-label"> / {{ data.down_count }} DOWN</span>
           </div>
         </div>
-      </div>
+
+        <!-- CPU 使用率 -->
+        <div class="metric-card">
+          <div class="metric-header">
+            <span>CPU 使用率</span>
+            <span class="metric-val">{{ data.cpu?.toFixed(1) ?? '--' }}%</span>
+          </div>
+          <div class="bar-bg">
+            <div class="bar-fill"
+              :style="{ width: (data.cpu ?? 0) + '%' }"
+              :class="{ warning: (data.cpu ?? 0) > 80 }"></div>
+          </div>
+        </div>
+
+        <!-- 内存使用率 -->
+        <div class="metric-card">
+          <div class="metric-header">
+            <span>内存使用率</span>
+            <span class="metric-val">{{ data.memory?.toFixed(1) ?? '--' }}%</span>
+          </div>
+          <div class="bar-bg">
+            <div class="bar-fill"
+              :style="{ width: (data.memory ?? 0) + '%' }"
+              :class="{ warning: (data.memory ?? 0) > 80 }"></div>
+          </div>
+        </div>
+
+        <!-- 磁盘使用率 -->
+        <div class="metric-card">
+          <div class="metric-header">
+            <span>存储空间</span>
+            <span class="metric-val">{{ data.disk?.toFixed(1) ?? '--' }}%</span>
+          </div>
+          <div class="bar-bg">
+            <div class="bar-fill"
+              :style="{ width: (data.disk ?? 0) + '%' }"></div>
+          </div>
+        </div>
+
+        <!-- 系统负载 -->
+        <div class="stats-row">
+          <div class="mini-card">
+            <span class="mini-label">Load 1m</span>
+            <span class="mini-val">{{ data.load1m?.toFixed(1) ?? '--' }}</span>
+          </div>
+          <div class="mini-card">
+            <span class="mini-label">Load 5m</span>
+            <span class="mini-val">{{ data.load5m?.toFixed(1) ?? '--' }}</span>
+          </div>
+          <div class="mini-card">
+            <span class="mini-label">Load 15m</span>
+            <span class="mini-val">{{ data.load15m?.toFixed(1) ?? '--' }}</span>
+          </div>
+        </div>
+
+        <!-- 网络吞吐 -->
+        <div class="stats-row">
+          <div class="mini-card">
+            <span class="mini-label">网络接收</span>
+            <span class="mini-val">{{ data.network_rx?.toFixed(1) ?? '--' }} Mb/s</span>
+          </div>
+          <div class="mini-card">
+            <span class="mini-label">网络发送</span>
+            <span class="mini-val">{{ data.network_tx?.toFixed(1) ?? '--' }} Mb/s</span>
+          </div>
+        </div>
+
+        <!-- 采集目标状态 -->
+        <div v-if="data.targets && data.targets.length > 0" class="alerts-section">
+          <span class="section-title">采集目标状态</span>
+          <div class="alerts-list">
+            <div v-for="(t, i) in data.targets" :key="i"
+              class="alert-item" :class="t.up ? 'success' : 'warn'">
+              <span class="alert-icon">{{ t.up ? '✅' : '⚠️' }}</span>
+              <div class="alert-body">
+                <span class="alert-desc">{{ t.job }}</span>
+                <span class="alert-time">{{ t.instance }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
     </div>
   </div>
 </template>
 
 <style scoped>
 .monitor-drawer {
-  width: var(--monitor-drawer-w);
+  width: 280px;
   background: var(--bg-sidebar-sub);
   border-left: 1px solid var(--border-color);
   position: fixed;
   right: -300px;
   top: 0;
   height: 100vh;
-  transition: right var(--transition-normal);
+  transition: right 0.3s ease;
   z-index: 100;
   display: flex;
   flex-direction: column;
@@ -180,6 +265,19 @@ onUnmounted(() => {
   border: 1px solid var(--border-color);
 }
 
+.status-card.ok {
+  border-color: rgba(16, 163, 127, 0.3);
+}
+
+.status-card.warn {
+  border-color: rgba(255, 159, 64, 0.3);
+}
+
+.status-card.error {
+  border-color: rgba(229, 62, 62, 0.3);
+  background: rgba(229, 62, 62, 0.04);
+}
+
 .card-title {
   font-size: 0.72rem;
   color: var(--text-muted);
@@ -198,19 +296,47 @@ onUnmounted(() => {
 .status-dot {
   width: 8px; height: 8px;
   border-radius: 50%;
+  background: var(--text-muted);
+  animation: pulse 1.5s infinite;
 }
 
 .status-dot.green {
   background: var(--accent);
   box-shadow: 0 0 6px var(--accent);
+  animation: none;
+}
+
+.status-dot.yellow {
+  background: #ff9f40;
+  box-shadow: 0 0 6px #ff9f40;
+  animation: none;
+}
+
+.status-dot.red {
+  background: #e53e3e;
+  box-shadow: 0 0 6px #e53e3e;
+  animation: none;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
 }
 
 .status-text {
   font-size: 0.8rem;
   font-weight: 500;
+  color: var(--text-primary);
 }
 
-/* 指标卡片 */
+.target-counts {
+  margin-top: 6px;
+  font-size: 0.7rem;
+}
+
+.up-label { color: var(--accent); }
+.down-label { color: #e53e3e; }
+
 .metric-card {
   display: flex;
   flex-direction: column;
@@ -244,23 +370,23 @@ onUnmounted(() => {
 }
 
 .bar-fill.warning {
-  background: var(--text-error);
+  background: #e53e3e;
 }
 
 .stats-row {
   display: flex;
-  gap: 12px;
+  gap: 10px;
 }
 
 .mini-card {
   flex: 1;
   background: var(--bg-input);
-  padding: 12px;
+  padding: 10px;
   border-radius: var(--radius-md);
   border: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .mini-label {
@@ -270,17 +396,15 @@ onUnmounted(() => {
 }
 
 .mini-val {
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 700;
   color: var(--text-heading);
 }
 
-/* 告警历史 */
 .alerts-section {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-top: 10px;
 }
 
 .section-title {
@@ -293,13 +417,13 @@ onUnmounted(() => {
 .alerts-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
 }
 
 .alert-item {
   display: flex;
-  gap: 10px;
-  padding: 10px;
+  gap: 8px;
+  padding: 8px 10px;
   border-radius: var(--radius-md);
   font-size: 0.75rem;
   border: 1px solid var(--border-color);
@@ -314,18 +438,23 @@ onUnmounted(() => {
 }
 
 .alert-icon {
-  font-size: 1rem;
+  font-size: 0.9rem;
+  flex-shrink: 0;
 }
 
 .alert-body {
   display: flex;
   flex-direction: column;
   gap: 2px;
+  overflow: hidden;
 }
 
 .alert-desc {
   color: var(--text-primary);
   font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .alert-time {

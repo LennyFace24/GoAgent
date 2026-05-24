@@ -10,7 +10,7 @@ export default defineConfig({
       allow: ['.'] // 严格限制 Vite FS 作用域在当前前端工作区，避免向上越界触发沙箱 Denied 错误
     },
     proxy: {
-      '^/(chat|chat_stream|ai_ops|upload_file|search|history|conversations?|conversation)': {
+      '^/(chat|chat_stream|ai_ops|upload_file|search|history|conversations?|conversation|api/metrics|permission/response)': {
         target: 'http://127.0.0.1:8080',
         changeOrigin: true,
       },
