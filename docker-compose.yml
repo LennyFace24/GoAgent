@@ -36,6 +36,8 @@ services:
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # node_exporter:
   #   image: prom/node-exporter:latest
