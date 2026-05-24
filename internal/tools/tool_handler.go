@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/LennyFace24/MiniAgent/internal/config"
+	"github.com/LennyFace24/MiniAgent/internal/task"
 	"github.com/LennyFace24/MiniAgent/internal/tools/basic_tool"
 	"github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/LennyFace24/MiniAgent/internal/tools/extra_tool"
@@ -17,6 +18,24 @@ type ToolHandler struct {
 
 func NewToolHandler(fileSearcher extratool.FileSearcher) (*ToolHandler, error) {
 	cfg := config.GetConfig()
+
+	taskManager := task.NewTaskManager()
+	taskCreateTool, err := taskManager.CreateTaskTool()
+	if err != nil {
+		return nil, fmt.Errorf("创建 create_task 工具失败: %w", err)
+	}
+	taskUpdateStatusTool, err := taskManager.UpdateStatusTool()
+	if err != nil {
+		return nil, fmt.Errorf("创建 update_task_status 工具失败: %w", err)
+	}
+	taskGetTool, err := taskManager.GetTaskTool()
+	if err != nil {
+		return nil, fmt.Errorf("创建 get_task 工具失败: %w", err)
+	}
+	taskListTool, err := taskManager.ListTasksTool()
+	if err != nil {
+		return nil, fmt.Errorf("创建 list_tasks 工具失败: %w", err)
+	}
 
 	bashTool, err := basictool.NewBashTool()
 	if err != nil {
@@ -67,6 +86,10 @@ func NewToolHandler(fileSearcher extratool.FileSearcher) (*ToolHandler, error) {
 			knowledgeTool,
 			subProxyTool,
 			compactTool,
+			taskCreateTool,
+			taskUpdateStatusTool,
+			taskGetTool,
+			taskListTool,
 		},
 		CompactTrigger: compactTrigger,
 	}, nil
