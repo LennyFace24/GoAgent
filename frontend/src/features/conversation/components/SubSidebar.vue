@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
+import type { Conversation } from '../types'
 
 const props = defineProps<{
   activeNav: string
@@ -10,12 +11,6 @@ const emit = defineEmits<{
   'select': [id: string]
   'created': [id: string]
 }>()
-
-interface Conversation {
-  id: string
-  title: string
-  updated_at: string
-}
 
 const conversations = ref<Conversation[]>([])
 const searchQuery = ref('')

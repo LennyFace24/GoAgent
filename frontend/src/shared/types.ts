@@ -8,6 +8,7 @@ export interface BaseMessage {
   content?: string
   streaming?: boolean
   order?: number
+  isThinking?: boolean
 }
 
 // 用户/助手消息
@@ -40,6 +41,7 @@ export interface PermissionMessage extends BaseMessage {
   name: string
   args?: string
   reason?: string
+  callId?: string
   responded?: boolean
   approved?: boolean
 }

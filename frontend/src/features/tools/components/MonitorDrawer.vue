@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { ref, onUnmounted, watch } from 'vue'
+import type { MetricsData } from '../types'
 
 const props = defineProps<{
   isOpen: boolean
@@ -8,28 +9,6 @@ const props = defineProps<{
 const emit = defineEmits<{
   'close': []
 }>()
-
-interface TargetState {
-  job: string
-  instance: string
-  up: boolean
-}
-
-interface MetricsData {
-  status: string
-  cpu?: number
-  memory?: number
-  disk?: number
-  load1m?: number
-  load5m?: number
-  load15m?: number
-  network_rx?: number
-  network_tx?: number
-  up_count: number
-  down_count: number
-  targets?: TargetState[]
-  error?: string
-}
 
 const data = ref<MetricsData | null>(null)
 const loading = ref(false)
@@ -127,9 +106,8 @@ onUnmounted(() => {
             <span class="metric-val">{{ data.cpu?.toFixed(1) ?? '--' }}%</span>
           </div>
           <div class="bar-bg">
-            <div class="bar-fill"
-              :style="{ width: (data.cpu ?? 0) + '%' }"
-              :class="{ warning: (data.cpu ?? 0) > 80 }"></div>
+            <div class="bar-fill" :style="{ width: (data.cpu ?? 0) + '%' }" :class="{ warning: (data.cpu ?? 0) > 80 }">
+            </div>
           </div>
         </div>
 
@@ -140,8 +118,7 @@ onUnmounted(() => {
             <span class="metric-val">{{ data.memory?.toFixed(1) ?? '--' }}%</span>
           </div>
           <div class="bar-bg">
-            <div class="bar-fill"
-              :style="{ width: (data.memory ?? 0) + '%' }"
+            <div class="bar-fill" :style="{ width: (data.memory ?? 0) + '%' }"
               :class="{ warning: (data.memory ?? 0) > 80 }"></div>
           </div>
         </div>
@@ -153,8 +130,7 @@ onUnmounted(() => {
             <span class="metric-val">{{ data.disk?.toFixed(1) ?? '--' }}%</span>
           </div>
           <div class="bar-bg">
-            <div class="bar-fill"
-              :style="{ width: (data.disk ?? 0) + '%' }"></div>
+            <div class="bar-fill" :style="{ width: (data.disk ?? 0) + '%' }"></div>
           </div>
         </div>
 
@@ -190,8 +166,7 @@ onUnmounted(() => {
         <div v-if="data.targets && data.targets.length > 0" class="alerts-section">
           <span class="section-title">采集目标状态</span>
           <div class="alerts-list">
-            <div v-for="(t, i) in data.targets" :key="i"
-              class="alert-item" :class="t.up ? 'success' : 'warn'">
+            <div v-for="(t, i) in data.targets" :key="i" class="alert-item" :class="t.up ? 'success' : 'warn'">
               <span class="alert-icon">{{ t.up ? '✅' : '⚠️' }}</span>
               <div class="alert-body">
                 <span class="alert-desc">{{ t.job }}</span>
@@ -294,7 +269,8 @@ onUnmounted(() => {
 }
 
 .status-dot {
-  width: 8px; height: 8px;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
   background: var(--text-muted);
   animation: pulse 1.5s infinite;
@@ -319,8 +295,15 @@ onUnmounted(() => {
 }
 
 @keyframes pulse {
-  0%, 100% { opacity: 0.3; }
-  50% { opacity: 1; }
+
+  0%,
+  100% {
+    opacity: 0.3;
+  }
+
+  50% {
+    opacity: 1;
+  }
 }
 
 .status-text {
@@ -334,8 +317,13 @@ onUnmounted(() => {
   font-size: 0.7rem;
 }
 
-.up-label { color: var(--accent); }
-.down-label { color: #e53e3e; }
+.up-label {
+  color: var(--accent);
+}
+
+.down-label {
+  color: #e53e3e;
+}
 
 .metric-card {
   display: flex;
@@ -356,7 +344,8 @@ onUnmounted(() => {
 }
 
 .bar-bg {
-  width: 100%; height: 8px;
+  width: 100%;
+  height: 8px;
   background: var(--bg-input);
   border-radius: 4px;
   overflow: hidden;

@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, nextTick } from 'vue'
+import type { Message, ApiMessage, ApiToolCall } from '../../../shared/types'
 
 const props = defineProps<{
   mode: string
@@ -12,39 +13,11 @@ const emit = defineEmits<{
   'update:isMonitorOpen': [value: boolean]
 }>()
 
-interface ToolCall {
-  function: { name: string; arguments: string }
-  id: string
-}
-
-interface ApiMessage {
-  role: string
-  content: string
-  tool_calls?: ToolCall[]
-  tool_name?: string
-  tool_call_id?: string
-}
-
-interface Message {
-  id: number
-  role: 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'permission_req'
-  content?: string
-  name?: string
-  args?: string
-  result?: string
-  callId?: string
-  requestId?: string
-  reason?: string
-  isThinking?: boolean
-  responded?: boolean
-}
-
 const messages = ref<Message[]>([])
 const inputText = ref('')
 const isSending = ref(false)
 const msgArea = ref<HTMLElement | null>(null)
 let activeAbort: AbortController | null = null
-let orderCounter = 0
 
 function scrollToBottom() {
   nextTick(() => {
@@ -62,7 +35,6 @@ function triggerQuickAction(text: string) {
 // 从后端加载对话历史
 async function loadHistory() {
   messages.value = []
-  orderCounter = 0
   try {
     const res = await fetch(`/conversation/${props.conversationId}`)
     if (!res.ok) {
