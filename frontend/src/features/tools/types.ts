@@ -13,7 +13,10 @@ export interface TargetState {
 export interface MetricsData {
   status: string
   cpu?: number
+  cpu_freq_mhz?: number
   memory?: number
+  mem_total_gb?: number
+  mem_used_gb?: number
   disk?: number
   load1m?: number
   load5m?: number

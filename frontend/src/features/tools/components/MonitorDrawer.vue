@@ -44,7 +44,7 @@ async function fetchMetrics() {
 watch(() => props.isOpen, (open) => {
   if (open) {
     fetchMetrics()
-    intervalId = setInterval(fetchMetrics, 5000)
+    intervalId = setInterval(fetchMetrics, 3000) // 3秒刷新一次
   } else {
     if (intervalId) {
       clearInterval(intervalId)
@@ -109,6 +109,9 @@ onUnmounted(() => {
             <div class="bar-fill" :style="{ width: (data.cpu ?? 0) + '%' }" :class="{ warning: (data.cpu ?? 0) > 80 }">
             </div>
           </div>
+          <div v-if="data.cpu_freq_mhz" class="metric-sub">
+            最大频率 {{ data.cpu_freq_mhz.toFixed(0) }} MHz
+          </div>
         </div>
 
         <!-- 内存使用率 -->
@@ -120,6 +123,9 @@ onUnmounted(() => {
           <div class="bar-bg">
             <div class="bar-fill" :style="{ width: (data.memory ?? 0) + '%' }"
               :class="{ warning: (data.memory ?? 0) > 80 }"></div>
+          </div>
+          <div v-if="data.mem_used_gb != null && data.mem_total_gb != null" class="metric-sub">
+            {{ data.mem_used_gb.toFixed(1) }} / {{ data.mem_total_gb.toFixed(1) }} GB
           </div>
         </div>
 
@@ -341,6 +347,12 @@ onUnmounted(() => {
 .metric-val {
   font-weight: 600;
   color: var(--text-heading);
+}
+
+.metric-sub {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  margin-top: 2px;
 }
 
 .bar-bg {
