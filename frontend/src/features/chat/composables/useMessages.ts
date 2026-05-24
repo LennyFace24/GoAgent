@@ -7,7 +7,7 @@ export function useMessages(conversationId: Ref<string>) {
   async function loadHistory(): Promise<void> {
     messages.value = []
     try {
-      const res = await fetch(`/conversation/${conversationId.value}`)
+      const res = await fetch(`/api/conversation/${conversationId.value}`)
       if (!res.ok) return
       const data = await res.json()
       const lines: ApiMessage[] = data.messages || []

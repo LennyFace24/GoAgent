@@ -18,7 +18,7 @@ export function useFileUpload() {
     try {
       const form = new FormData()
       form.append('file', file.value)
-      const res = await fetch('/upload_file', { method: 'POST', body: form })
+      const res = await fetch('/api/upload_file', { method: 'POST', body: form })
       const data = await res.json()
       msg.value = data.error ? `错误: ${data.error}` : `已上传: ${data.file}`
     } catch (e) {

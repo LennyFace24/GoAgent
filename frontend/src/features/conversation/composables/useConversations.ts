@@ -6,7 +6,7 @@ export function useConversations() {
 
   async function load(): Promise<void> {
     try {
-      const res = await fetch('/conversations')
+      const res = await fetch('/api/conversations')
       if (!res.ok) return
       const data = await res.json()
       conversations.value = data.conversations || []
@@ -15,7 +15,7 @@ export function useConversations() {
 
   async function create(): Promise<string | null> {
     try {
-      const res = await fetch('/conversation', {
+      const res = await fetch('/api/conversation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: '新对话' }),

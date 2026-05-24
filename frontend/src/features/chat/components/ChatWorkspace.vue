@@ -36,7 +36,7 @@ function triggerQuickAction(text: string) {
 async function loadHistory() {
   messages.value = []
   try {
-    const res = await fetch(`/conversation/${props.conversationId}`)
+    const res = await fetch(`/api/conversation/${props.conversationId}`)
     if (!res.ok) {
       messages.value.push({
         id: Date.now(),
@@ -127,7 +127,7 @@ async function handleSend() {
   activeAbort = abortCtrl
 
   try {
-    const endpoint = props.mode === 'aiops' ? '/ai_ops' : '/chat_stream'
+    const endpoint = props.mode === 'aiops' ? '/api/ai_ops' : '/api/chat_stream'
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -269,7 +269,7 @@ async function respondPermission(msg: Message, approved: boolean) {
   if (msg.role !== 'permission_req' || !msg.requestId) return
   msg.responded = true
   try {
-    await fetch('/permission/response', {
+    await fetch('/api/permission/response', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: msg.requestId, approved }),

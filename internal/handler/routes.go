@@ -43,22 +43,17 @@ func SetupHandler(r *gin.Engine) {
 }
 
 func SetupRoutes(r *gin.Engine) {
-	// 聊天接口
-	r.POST("/chat_stream", chatStreamHandler.ChatStream)
-	// 上传文件接口
-	r.POST("/upload_file", fileHandler.UploadFile)
-	// 搜索文件接口
-	r.POST("/search", fileHandler.Search)
-	// AIOps接口
-	r.POST("/ai_ops", aiopsHandler.Diagnose)
-	// 系统监控指标接口
-	r.GET("/api/metrics", metricsHandler.GetMetrics)
-	// 权限确认接口
-	r.POST("/permission/response", chatStreamHandler.PermissionResponse)
-	// 对话管理接口
-	r.GET("/conversations", conversationHandler.GetConversations)
-	r.POST("/conversation", conversationHandler.CreateConversation)
-	r.GET("/conversation/:id", conversationHandler.GetConversation)
-	r.DELETE("/conversation/:id", conversationHandler.DeleteConversation)
-
+	api := r.Group("/api")
+	{
+		api.POST("/chat_stream", chatStreamHandler.ChatStream)
+		api.POST("/upload_file", fileHandler.UploadFile)
+		api.POST("/search", fileHandler.Search)
+		api.POST("/ai_ops", aiopsHandler.Diagnose)
+		api.GET("/metrics", metricsHandler.GetMetrics)
+		api.POST("/permission/response", chatStreamHandler.PermissionResponse)
+		api.GET("/conversations", conversationHandler.GetConversations)
+		api.POST("/conversation", conversationHandler.CreateConversation)
+		api.GET("/conversation/:id", conversationHandler.GetConversation)
+		api.DELETE("/conversation/:id", conversationHandler.DeleteConversation)
+	}
 }

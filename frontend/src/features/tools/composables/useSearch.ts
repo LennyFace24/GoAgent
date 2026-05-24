@@ -11,7 +11,7 @@ export function useSearch() {
     searching.value = true
     results.value = []
     try {
-      const res = await fetch('/search', {
+      const res = await fetch('/api/search', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ query: query.value }),

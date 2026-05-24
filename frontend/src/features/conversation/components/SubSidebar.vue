@@ -24,7 +24,7 @@ const docsList = ref<string[]>([
 
 async function fetchConvs() {
   try {
-    const res = await fetch('/conversations')
+    const res = await fetch('/api/conversations')
     if (res.ok) {
       const data = await res.json()
       conversations.value = data.conversations || []
@@ -42,7 +42,7 @@ async function fetchConvs() {
 async function createNewConv() {
   const title = props.activeNav === 'aiops' ? '新诊断任务' : '新会话对话'
   try {
-    const res = await fetch('/conversation', {
+    const res = await fetch('/api/conversation', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title })
@@ -62,7 +62,7 @@ async function createNewConv() {
 async function deleteConv(id: string, event: Event) {
   event.stopPropagation()
   try {
-    await fetch('/conversation/' + id, { method: 'DELETE' })
+    await fetch('/api/conversation/' + id, { method: 'DELETE' })
     await fetchConvs()
     if (props.activeId === id && conversations.value.length > 0) {
       emit('select', conversations.value[0].id)

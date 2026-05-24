@@ -55,7 +55,7 @@ export function useSSE(messages: Ref<Message[]>) {
     scrollBottom(scrollEl)
 
     try {
-      const endpoint = mode === 'ai_ops' ? '/ai_ops' : '/chat_stream'
+      const endpoint = mode === 'ai_ops' ? '/api/ai_ops' : '/api/chat_stream'
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -168,7 +168,7 @@ export function useSSE(messages: Ref<Message[]>) {
     msg.responded = true
     msg.approved = approved
     try {
-      await fetch('/permission/response', {
+      await fetch('/api/permission/response', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: msg.requestId, approved, always }),
