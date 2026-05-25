@@ -68,6 +68,16 @@ function toggleTheme() {
         <span class="btn-icon">📚</span>
         <span class="btn-tooltip">知识手册</span>
       </button>
+
+      <button 
+        class="nav-btn" 
+        :class="{ active: activeNav === 'dashboard' }"
+        @click="emit('update:activeNav', 'dashboard')"
+        title="核心监控指标 (Dashboard)"
+      >
+        <span class="btn-icon">📊</span>
+        <span class="btn-tooltip">核心指标</span>
+      </button>
     </div>
 
     <div class="footer-icons">

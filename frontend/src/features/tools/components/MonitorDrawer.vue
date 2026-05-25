@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { ref, onUnmounted, watch } from 'vue'
 import type { MetricsData } from '../types'
 
@@ -126,7 +126,18 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 磁盘使用率 -->
+        <!-- Swap 使用率 (omitempty) -->
+        <div v-if="data.swap_use != null" class="metric-card">
+          <div class="metric-header">
+            <span>Swap 使用率</span>
+            <span class="metric-val">{{ data.swap_use.toFixed(1) }}%</span>
+          </div>
+          <div class="bar-bg">
+            <div class="bar-fill" :style="{ width: data.swap_use + '%' }" :class="{ warning: data.swap_use > 80 }"></div>
+          </div>
+        </div>
+
+        <!-- 存储空间 -->
         <div class="metric-card">
           <div class="metric-header">
             <span>存储空间</span>
@@ -134,6 +145,28 @@ onUnmounted(() => {
           </div>
           <div class="bar-bg">
             <div class="bar-fill" :style="{ width: (data.disk ?? 0) + '%' }"></div>
+          </div>
+        </div>
+
+        <!-- 磁盘 IO 繁忙度 (omitempty) -->
+        <div v-if="data.disk_io_util != null" class="metric-card">
+          <div class="metric-header">
+            <span>磁盘 IO 繁忙度</span>
+            <span class="metric-val">{{ data.disk_io_util.toFixed(1) }}%</span>
+          </div>
+          <div class="bar-bg">
+            <div class="bar-fill" :style="{ width: data.disk_io_util + '%' }" :class="{ warning: data.disk_io_util > 80 }"></div>
+          </div>
+        </div>
+
+        <!-- Inode 使用率 (omitempty) -->
+        <div v-if="data.inode_use != null" class="metric-card">
+          <div class="metric-header">
+            <span>Inode 使用率</span>
+            <span class="metric-val">{{ data.inode_use.toFixed(1) }}%</span>
+          </div>
+          <div class="bar-bg">
+            <div class="bar-fill" :style="{ width: data.inode_use + '%' }" :class="{ warning: data.inode_use > 80 }"></div>
           </div>
         </div>
 
@@ -165,12 +198,24 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- TCP TIME_WAIT 和 OOM Kills (omitempty) -->
+        <div v-if="data.tcp_tw != null || data.oom_kills_1h != null" class="stats-row">
+          <div v-if="data.tcp_tw != null" class="mini-card">
+            <span class="mini-label">TCP TIME_WAIT</span>
+            <span class="mini-val">{{ data.tcp_tw.toFixed(0) }} 个</span>
+          </div>
+          <div v-if="data.oom_kills_1h != null" class="mini-card">
+            <span class="mini-label">OOM Kills (1h)</span>
+            <span class="mini-val" :style="{ color: data.oom_kills_1h > 0 ? '#e53e3e' : 'inherit', fontWeight: data.oom_kills_1h > 0 ? 'bold' : 'normal' }">{{ data.oom_kills_1h.toFixed(0) }} 次</span>
+          </div>
+        </div>
+
         <!-- 采集目标状态 -->
         <div v-if="data.targets && data.targets.length > 0" class="alerts-section">
           <span class="section-title">采集目标状态</span>
           <div class="alerts-list">
             <div v-for="(t, i) in data.targets" :key="i" class="alert-item" :class="t.up ? 'success' : 'warn'">
-              <span class="alert-icon">{{ t.up ? '✅' : '⚠️' }}</span>
+              <span class="alert-icon">{{ t.up ? '✓' : '⚠️' }}</span>
               <div class="alert-body">
                 <span class="alert-desc">{{ t.job }}</span>
                 <span class="alert-time">{{ t.instance }}</span>

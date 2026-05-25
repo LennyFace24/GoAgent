@@ -3,6 +3,7 @@ import { ref } from 'vue'
 import SlimSidebar from './features/conversation/components/SlimSidebar.vue'
 import SubSidebar from './features/conversation/components/SubSidebar.vue'
 import ChatWorkspace from './features/chat/components/ChatWorkspace.vue'
+import DashboardView from './features/tools/components/DashboardView.vue'
 import MonitorDrawer from './features/tools/components/MonitorDrawer.vue'
 
 // 1. Cherry Studio 多层布局状态管理
@@ -34,11 +35,16 @@ function onCreated(id: string): void {
       @created="onCreated"
     />
     
-    <!-- 第三栏：智能问答主视窗控制台 (Workspace) -->
+    <!-- 第三栏：智能问答主视窗控制台 (Workspace) / 或者核心监控仪表盘 -->
     <ChatWorkspace
+      v-if="activeNav !== 'dashboard'"
       :mode="activeNav"
       :conversationId="activeConversationId"
       v-model:isMonitorOpen="isMonitorOpen"
+    />
+    
+    <DashboardView
+      v-else
     />
     
     <!-- 第四栏：Prometheus 指标滑出动态监控抽屉 (Monitor Drawer) -->

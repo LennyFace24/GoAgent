@@ -117,7 +117,7 @@ watch(() => props.activeNav, () => {
 <template>
   <div class="sub-sidebar">
     <!-- 头部搜索与操作 -->
-    <div class="header-search">
+    <div class="header-search" v-if="activeNav !== 'dashboard'">
       <input 
         v-model="searchQuery"
         type="text" 
@@ -143,7 +143,28 @@ watch(() => props.activeNav, () => {
         >
           <span class="item-icon">💬</span>
           <span class="item-title">{{ conv.title }}</span>
-          <button class="delete-item-btn" @click="deleteConv(conv.id, )">×</button>
+          <button class="delete-item-btn" @click="deleteConv(conv.id, $event)">×</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 指标仪表盘模式 (Dashboard) -->
+    <div v-else-if="activeNav === 'dashboard'" class="sidebar-list">
+      <div class="list-title">
+        <span>监控菜单</span>
+      </div>
+      <div class="items-container">
+        <div class="conv-item active">
+          <span class="item-icon">📊</span>
+          <span class="item-title">核心指标监控</span>
+        </div>
+        <div class="conv-item" style="cursor: default; opacity: 0.85;">
+          <span class="item-icon">📈</span>
+          <span class="item-title">实时趋势折线</span>
+        </div>
+        <div class="conv-item" style="cursor: default; opacity: 0.85;">
+          <span class="item-icon">🧁</span>
+          <span class="item-title">资源配比饼图</span>
         </div>
       </div>
     </div>
