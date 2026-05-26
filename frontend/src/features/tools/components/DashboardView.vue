@@ -1,5 +1,9 @@
-﻿<script setup lang="ts">
-import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
+﻿<script lang="ts">
+export default { name: 'DashboardView' }
+</script>
+
+<script setup lang="ts">
+import { ref, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick } from 'vue'
 import type { MetricsData } from '../types'
 import { BarChart3, AlertTriangle, TrendingUp, PieChart } from 'lucide-vue-next'
 
@@ -335,10 +339,11 @@ function drawPieChart() {
   ctx.fill()
 
   // 3. 环形中心文字
-  ctx.fillStyle = getThemeColor('--text-main', '#1d1d1f')
+  ctx.fillStyle = getThemeColor('--text-secondary', '#6e6e73')
   ctx.font = 'bold 11px sans-serif'
   ctx.textAlign = 'center'
   ctx.fillText('物理总内存', centerX, centerY - 5)
+  ctx.fillStyle = getThemeColor('--text-primary', '#e5e5eb')
   ctx.font = 'bold 13px monospace'
   ctx.fillText(`${memTotal.toFixed(1)} GB`, centerX, centerY + 10)
 
@@ -348,7 +353,7 @@ function drawPieChart() {
   const legendX = width * 0.7
   segments.forEach((seg, i) => {
     const legendY = centerY - (segments.length * 15) / 2 + i * 25
-    
+
     // 图例色块
     ctx.beginPath()
     ctx.arc(legendX - 10, legendY - 3, 5, 0, 2 * Math.PI)
@@ -356,12 +361,12 @@ function drawPieChart() {
     ctx.fill()
 
     // 标签文字
-    ctx.fillStyle = getThemeColor('--text-main', '#1d1d1f')
+    ctx.fillStyle = getThemeColor('--text-primary', '#e5e5eb')
     ctx.font = 'bold 11px sans-serif'
     ctx.fillText(`${seg.label}`, legendX, legendY)
 
     // 容量数值
-    ctx.fillStyle = getThemeColor('--text-muted', '#86868b')
+    ctx.fillStyle = getThemeColor('--text-secondary', '#6e6e73')
     ctx.font = '10px monospace'
     ctx.fillText(`${seg.value.toFixed(1)} GB (${((seg.value / totalVal) * 100).toFixed(0)}%)`, legendX, legendY + 12)
   })
@@ -394,12 +399,20 @@ function hexToRgbA(hex: string, alpha: number): string {
   return hex
 }
 
-onMounted(() => {
+// keep-alive: 组件激活时启动定时器，失活时暂停
+onActivated(() => {
   fetchMetrics()
   intervalId = setInterval(fetchMetrics, 3000)
   window.addEventListener('resize', drawCharts)
 })
 
+onDeactivated(() => {
+  if (intervalId) { clearInterval(intervalId); intervalId = null }
+  if (animationFrameId !== null) { cancelAnimationFrame(animationFrameId); animationFrameId = null }
+  window.removeEventListener('resize', drawCharts)
+})
+
+// 组件彻底销毁时清理（keep-alive max 溢出时触发）
 onUnmounted(() => {
   if (intervalId) clearInterval(intervalId)
   if (animationFrameId !== null) cancelAnimationFrame(animationFrameId)
@@ -425,7 +438,7 @@ watch(() => props.view, () => {
       </div>
       <div class="header-right">
         <span class="pulse-indicator" :class="{ loading: loading }"></span>
-        <span class="status-label">{{ loading ? '正在载入指标...' : '每 3s 实时同步' }}</span>
+        <span class="status-label">{{ loading ? '正在载入指标...' : '' }}</span>
       </div>
     </header>
 

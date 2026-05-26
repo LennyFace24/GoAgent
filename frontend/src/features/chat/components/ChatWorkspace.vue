@@ -1,5 +1,9 @@
+<script lang="ts">
+export default { name: 'ChatWorkspace' }
+</script>
+
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick } from 'vue'
+import { ref, watch, onMounted, onActivated, onDeactivated, nextTick } from 'vue'
 import type { Message, ApiMessage, ApiToolCall } from '../../../shared/types'
 
 const props = defineProps<{
@@ -283,6 +287,19 @@ function toggleTool(index: number) {
 }
 
 onMounted(() => {
+  loadHistory()
+})
+
+// keep-alive: 失活时中止进行中的 SSE 连接
+onDeactivated(() => {
+  if (activeAbort) {
+    activeAbort.abort()
+    activeAbort = null
+  }
+})
+
+// keep-alive: 重新激活时刷新历史（可能在其他模块切换了对话）
+onActivated(() => {
   loadHistory()
 })
 
