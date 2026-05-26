@@ -32,7 +32,8 @@ type ToolEvent struct {
 	Reason    string `json:"reason,omitempty"`
 }
 
-type ChatStreamService struct {
+// AgentService 统一的 Agent 服务，根据 mode 选择不同的 prompt 和行为
+type AgentService struct {
 	store          *store.ConversationStore
 	baseModel      model.BaseChatModel
 	toolModel      model.ToolCallingChatModel
@@ -41,7 +42,7 @@ type ChatStreamService struct {
 	perms          *permission.PermissionManager
 }
 
-func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore) *ChatStreamService {
+func NewAgentService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore) *AgentService {
 	compactTrigger := toolHandler.CompactTrigger
 	maxTokens := cfg.GetConfig().Llm.MaxTokens
 	chatModel, err := openai.NewChatModel(context.Background(), &openai.ChatModelConfig{
@@ -51,7 +52,7 @@ func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.Conve
 		MaxCompletionTokens: &maxTokens,
 	})
 	if err != nil {
-		log.Printf("ChatStreamService: ChatModel创建失败 %v", err)
+		log.Printf("AgentService: ChatModel创建失败 %v", err)
 		return nil
 	}
 
@@ -60,7 +61,7 @@ func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.Conve
 	for i, t := range tools_ {
 		info, infoErr := t.Info(context.Background())
 		if infoErr != nil {
-			log.Printf("ChatStreamService: 获取工具信息失败 %v", infoErr)
+			log.Printf("AgentService: 获取工具信息失败 %v", infoErr)
 			return nil
 		}
 		toolInfos[i] = info
@@ -68,11 +69,11 @@ func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.Conve
 
 	toolModel, err := chatModel.WithTools(toolInfos)
 	if err != nil {
-		log.Printf("ChatStreamService: 绑定工具失败 %v", err)
+		log.Printf("AgentService: 绑定工具失败 %v", err)
 		return nil
 	}
 
-	return &ChatStreamService{
+	return &AgentService{
 		store:          convStore,
 		baseModel:      chatModel,
 		toolModel:      toolModel,
@@ -82,30 +83,39 @@ func NewChatStreamService(toolHandler *tools.ToolHandler, convStore *store.Conve
 	}
 }
 
-func (s *ChatStreamService) ChatStream(ctx context.Context,
-	sessionID string, conversationID string, userMsg string) (*adk.AsyncIterator[*adk.AgentEvent], chan ToolEvent, error) {
+// Stream 启动流式 Agent 对话，mode 支持 "chat" 和 "aiops"
+func (s *AgentService) Stream(ctx context.Context,
+	mode string, sessionID string, conversationID string, userMsg string) (*adk.AsyncIterator[*adk.AgentEvent], chan ToolEvent, error) {
 
 	history, err := s.store.LoadHistory(sessionID, conversationID)
 	if err != nil {
-		log.Printf("ChatStreamService: 加载历史失败 %v", err)
+		log.Printf("AgentService: 加载历史失败 %v", err)
 		history = nil
 	}
 
+	// 根据 mode 选择 prompt block
 	b := prompt.NewBuilder()
-	b.Add(prompt.CoreBlock())
+	switch mode {
+	case "aiops":
+		b.Add(prompt.AIOpsCoreBlock())
+	default:
+		b.Add(prompt.CoreBlock())
+	}
 	b.Add(prompt.ToolsRuleBlock())
+
 	messages := []*schema.Message{schema.SystemMessage(b.Build())}
 	messages = append(messages, history...)
 	messages = append(messages, schema.UserMessage(userMsg))
 
 	iterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
 	toolEvents := make(chan ToolEvent, 64)
-	go s.runConversation(ctx, messages, generator, toolEvents, sessionID, conversationID)
+	go s.runLoop(ctx, mode, messages, generator, toolEvents, sessionID, conversationID)
 	return iterator, toolEvents, nil
 }
 
-func (s *ChatStreamService) runConversation(
+func (s *AgentService) runLoop(
 	ctx context.Context,
+	mode string,
 	messages []*schema.Message,
 	gen *adk.AsyncGenerator[*adk.AgentEvent],
 	toolEvents chan ToolEvent,
@@ -116,17 +126,13 @@ func (s *ChatStreamService) runConversation(
 	defer gen.Close()
 
 	const maxTurns = 20
-
 	turn := 0
-	todo_uncalled_count := 0
+	todoUncalledCount := 0
 
 	for {
-		// 回合数+1
 		turn++
-		// todo工具调用提醒
-		use_todo := false
 
-		// compact 检查：token 超阈值 或 LLM 主动触发
+		// compact 检查
 		level := contexttool.ShouldCompact(messages)
 		if s.compactTrigger.IsTriggered() {
 			level = contexttool.CompactFull
@@ -153,35 +159,39 @@ func (s *ChatStreamService) runConversation(
 			return
 		}
 
-		log.Printf("[Turn %d] ToolCalls 数量: %d", turn, len(fullMsg.ToolCalls))
+		log.Printf("[Turn %d] mode=%s ToolCalls 数量: %d", turn, mode, len(fullMsg.ToolCalls))
 		for i, tc := range fullMsg.ToolCalls {
 			log.Printf("[Turn %d] ToolCall[%d]: name=%s args=%s", turn, i, tc.Function.Name, tc.Function.Arguments)
 		}
 
-		// 检查是否有toolcall，没有则直接返回
 		if len(fullMsg.ToolCalls) == 0 {
 			log.Printf("[Turn %d] 无 ToolCall，返回最终回答", turn)
 			return
 		}
 
-		for _, tc := range fullMsg.ToolCalls {
-			if tc.Function.Name == "write_todo" || tc.Function.Name == "read_todo" {
-				use_todo = true
-				break
+		// todo 提醒（仅 chat 模式）
+		if mode != "aiops" {
+			useTodo := false
+			for _, tc := range fullMsg.ToolCalls {
+				if tc.Function.Name == "write_todo" || tc.Function.Name == "read_todo" {
+					useTodo = true
+					break
+				}
+			}
+			if !useTodo {
+				todoUncalledCount++
+			}
+			if !useTodo && todoUncalledCount >= 5 {
+				todoUncalledCount = 0
+				// 将在工具结果中注入提醒
 			}
 		}
-		if !use_todo {
-			todo_uncalled_count++
-		}
+
 		messages = append(messages, fullMsg)
 
-		needReminder := !use_todo && todo_uncalled_count >= 5
-		if needReminder {
-			todo_uncalled_count = 0
-		}
+		needReminder := mode != "aiops" && todoUncalledCount == 0
 
 		for _, tc := range fullMsg.ToolCalls {
-			// 发送 tool_call 事件
 			toolEvents <- ToolEvent{
 				Type:   "tool_call",
 				Name:   tc.Function.Name,
@@ -189,14 +199,12 @@ func (s *ChatStreamService) runConversation(
 				CallID: tc.ID,
 			}
 
-			// 解析工具参数
 			var toolInput map[string]any
 			json.Unmarshal([]byte(tc.Function.Arguments), &toolInput)
 			if toolInput == nil {
 				toolInput = map[string]any{}
 			}
 
-			// 权限检查
 			decision := s.perms.Check(tc.Function.Name, toolInput)
 			var result string
 
@@ -233,7 +241,7 @@ func (s *ChatStreamService) runConversation(
 					return
 				}
 
-			default: // allow
+			default:
 				var toolErr error
 				result, toolErr = s.executeTool(ctx, tc)
 				if toolErr != nil {
@@ -242,7 +250,6 @@ func (s *ChatStreamService) runConversation(
 				s.perms.ResetDenials()
 			}
 
-			// 熔断器：连续拒绝 3 次，提示切换模式
 			if s.perms.ShouldSuggestPlanMode() {
 				result += "\n\n[系统提醒] 工具调用已连续多次被拒绝，建议切换到 plan 模式。"
 				s.perms.ResetDenials()
@@ -253,7 +260,6 @@ func (s *ChatStreamService) runConversation(
 				needReminder = false
 			}
 
-			// 发送 tool_result 事件
 			toolEvents <- ToolEvent{
 				Type:   "tool_result",
 				Name:   tc.Function.Name,
@@ -265,11 +271,12 @@ func (s *ChatStreamService) runConversation(
 			messages = append(messages, msg)
 		}
 
-		// 达到最大轮次仍未回答，强制最后一轮
 		if turn >= maxTurns {
 			break
 		}
 	}
+
+	// 达到最大轮次，强制最后一轮直接回答
 	messages = append(messages, schema.UserMessage("你已调用足够多次工具，现在必须直接回答用户的问题。不要再调用任何工具。"))
 	stream, err := s.toolModel.Stream(ctx, messages)
 	if err != nil {
@@ -277,10 +284,9 @@ func (s *ChatStreamService) runConversation(
 		return
 	}
 	gen.Send(adk.EventFromMessage(nil, stream, schema.Assistant, ""))
-
 }
 
-func (s *ChatStreamService) executeTool(ctx context.Context, tc schema.ToolCall) (string, error) {
+func (s *AgentService) executeTool(ctx context.Context, tc schema.ToolCall) (string, error) {
 	for _, t := range s.tools {
 		info, err := t.Info(ctx)
 		if err != nil {
@@ -295,11 +301,11 @@ func (s *ChatStreamService) executeTool(ctx context.Context, tc schema.ToolCall)
 	return "", fmt.Errorf("tool not found: %s", tc.Function.Name)
 }
 
-func (s *ChatStreamService) SaveReply(ctx context.Context, sessionID, conversationID string, msgs []*schema.Message) {
+func (s *AgentService) SaveReply(ctx context.Context, sessionID, conversationID string, msgs []*schema.Message) {
 	if len(msgs) == 0 {
 		return
 	}
 	if err := s.store.SaveMessages(sessionID, conversationID, msgs...); err != nil {
-		log.Printf("ChatStreamService: 保存对话失败 %v", err)
+		log.Printf("AgentService: 保存对话失败 %v", err)
 	}
 }

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"math"
 	"net/http"
 
 	"github.com/LennyFace24/MiniAgent/internal/util"
@@ -59,7 +60,7 @@ func (h *MetricsHandler) GetMetrics(c *gin.Context) {
 	resp.Load15m = round1(h.pc.InstantQuery(`node_load15`))
 	resp.NetworkRx = round1(h.pc.InstantQuery(`rate(node_network_receive_bytes_total[5m]) * 8 / 1e6`))
 	resp.NetworkTx = round1(h.pc.InstantQuery(`rate(node_network_transmit_bytes_total[5m]) * 8 / 1e6`))
-	resp.SwapUse = round1(h.pc.InstantQuery(`(1 - node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes) * 100`))
+	resp.SwapUse = round1(h.pc.InstantQuery(`node_memory_SwapTotal_bytes > 0 and (1 - node_memory_SwapFree_bytes / node_memory_SwapTotal_bytes) * 100`))
 	resp.DiskIOUtil = round1(h.pc.InstantQuery(`rate(node_disk_io_time_seconds_total[5m]) * 100`))
 	resp.TcpTimeWait = round1(h.pc.InstantQuery(`node_sockstat_TCP_tw`))
 	resp.OomKills1h = round1(h.pc.InstantQuery(`increase(node_vmstat_oom_kill[1h])`))
@@ -87,6 +88,9 @@ func (h *MetricsHandler) GetMetrics(c *gin.Context) {
 
 func round1(v *float64, _ error) *float64 {
 	if v == nil {
+		return nil
+	}
+	if math.IsNaN(*v) || math.IsInf(*v, 0) {
 		return nil
 	}
 	rounded := float64(int(*v*10)) / 10

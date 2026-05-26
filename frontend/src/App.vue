@@ -10,6 +10,7 @@ import MonitorDrawer from './features/tools/components/MonitorDrawer.vue'
 const activeNav = ref<string>('chat')
 const activeConversationId = ref<string>('default')
 const isMonitorOpen = ref<boolean>(false)
+const dashboardView = ref<string>('overview')
 
 function onSelect(id: string): void {
   activeConversationId.value = id
@@ -17,6 +18,10 @@ function onSelect(id: string): void {
 
 function onCreated(id: string): void {
   activeConversationId.value = id
+}
+
+function onDashboardViewChange(view: string): void {
+  dashboardView.value = view
 }
 </script>
 
@@ -31,8 +36,10 @@ function onCreated(id: string): void {
     <SubSidebar
       :activeNav="activeNav"
       :activeId="activeConversationId"
+      :dashboardView="dashboardView"
       @select="onSelect"
       @created="onCreated"
+      @dashboard-view="onDashboardViewChange"
     />
     
     <!-- 第三栏：智能问答主视窗控制台 (Workspace) / 或者核心监控仪表盘 -->
@@ -45,6 +52,7 @@ function onCreated(id: string): void {
     
     <DashboardView
       v-else
+      :view="dashboardView"
     />
     
     <!-- 第四栏：Prometheus 指标滑出动态监控抽屉 (Monitor Drawer) -->

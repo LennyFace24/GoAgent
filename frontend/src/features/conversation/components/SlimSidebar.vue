@@ -1,5 +1,6 @@
 ﻿<script setup lang="ts">
 import { ref } from 'vue'
+import { MessageSquare, Activity, BookOpen, BarChart3, Sun, Moon } from 'lucide-vue-next'
 
 const props = defineProps<{
   activeNav: string
@@ -39,50 +40,51 @@ function toggleTheme() {
     </div>
     
     <div class="nav-icons">
-      <button 
-        class="nav-btn" 
+      <button
+        class="nav-btn"
         :class="{ active: activeNav === 'chat' }"
         @click="emit('update:activeNav', 'chat')"
         title="对话聊天 (Chat)"
       >
-        <span class="btn-icon">💬</span>
+        <MessageSquare class="btn-icon" :size="22" />
         <span class="btn-tooltip">常规对话</span>
       </button>
 
-      <button 
-        class="nav-btn" 
+      <button
+        class="nav-btn"
         :class="{ active: activeNav === 'aiops' }"
         @click="emit('update:activeNav', 'aiops')"
         title="智能运维诊断 (AIOps)"
       >
-        <span class="btn-icon">🩺</span>
+        <Activity class="btn-icon" :size="22" />
         <span class="btn-tooltip">AIOps 诊断</span>
       </button>
 
-      <button 
-        class="nav-btn" 
+      <button
+        class="nav-btn"
         :class="{ active: activeNav === 'rag' }"
         @click="emit('update:activeNav', 'rag')"
         title="本地知识库管理 (RAG)"
       >
-        <span class="btn-icon">📚</span>
+        <BookOpen class="btn-icon" :size="22" />
         <span class="btn-tooltip">知识手册</span>
       </button>
 
-      <button 
-        class="nav-btn" 
+      <button
+        class="nav-btn"
         :class="{ active: activeNav === 'dashboard' }"
         @click="emit('update:activeNav', 'dashboard')"
         title="核心监控指标 (Dashboard)"
       >
-        <span class="btn-icon">📊</span>
+        <BarChart3 class="btn-icon" :size="22" />
         <span class="btn-tooltip">核心指标</span>
       </button>
     </div>
 
     <div class="footer-icons">
       <button class="nav-btn theme-toggle" @click="toggleTheme" title="切换深浅主题">
-        <span class="btn-icon">🌓</span>
+        <Moon v-if="isDark" class="btn-icon" :size="22" />
+        <Sun v-else class="btn-icon" :size="22" />
       </button>
     </div>
   </div>
@@ -157,7 +159,9 @@ function toggleTheme() {
 }
 
 .btn-icon {
-  font-size: 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* 气泡悬浮提示 */

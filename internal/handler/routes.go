@@ -9,8 +9,7 @@ import (
 )
 
 var (
-	chatStreamHandler   *ChatStreamHandler
-	aiopsHandler        *AIOpsHandler
+	agentHandler        *AgentHandler
 	fileHandler         *FileHandler
 	toolsHandler        *tools.ToolHandler
 	conversationHandler *ConversationHandler
@@ -33,10 +32,8 @@ func SetupHandler(r *gin.Engine) {
 		panic("初始化工具处理器失败: " + err.Error())
 	}
 
-	chatStreamHandler = NewChatStreamHandler(
-		service.NewChatStreamService(toolsHandler, convStore))
-	aiopsHandler = NewAIOpsHandler(
-		service.NewAIOpsService(toolsHandler, convStore))
+	agentService := service.NewAgentService(toolsHandler, convStore)
+	agentHandler = NewAgentHandler(agentService)
 	fileHandler = NewFileHandler(fileService)
 	conversationHandler = NewConversationHandler(convStore)
 	metricsHandler = NewMetricsHandler(config.GetConfig().Prometheus.URL)
@@ -45,15 +42,25 @@ func SetupHandler(r *gin.Engine) {
 func SetupRoutes(r *gin.Engine) {
 	api := r.Group("/api")
 	{
-		api.POST("/chat_stream", chatStreamHandler.ChatStream)
+		// 统一 Agent 端点，通过中间件注入 mode
+		api.POST("/chat_stream", setAgentMode("chat"), agentHandler.Stream)
+		api.POST("/ai_ops", setAgentMode("aiops"), agentHandler.Stream)
+		api.POST("/permission/response", agentHandler.PermissionResponse)
+
 		api.POST("/upload_file", fileHandler.UploadFile)
 		api.POST("/search", fileHandler.Search)
-		api.POST("/ai_ops", aiopsHandler.Diagnose)
 		api.GET("/metrics", metricsHandler.GetMetrics)
-		api.POST("/permission/response", chatStreamHandler.PermissionResponse)
 		api.GET("/conversations", conversationHandler.GetConversations)
 		api.POST("/conversation", conversationHandler.CreateConversation)
 		api.GET("/conversation/:id", conversationHandler.GetConversation)
 		api.DELETE("/conversation/:id", conversationHandler.DeleteConversation)
+	}
+}
+
+// setAgentMode 中间件：在 gin.Context 中注入 agent 模式
+func setAgentMode(mode string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Set("agent_mode", mode)
+		c.Next()
 	}
 }

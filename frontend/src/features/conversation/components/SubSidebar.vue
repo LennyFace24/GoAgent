@@ -1,15 +1,18 @@
 ﻿<script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import type { Conversation } from '../types'
+import { MessageSquare, BarChart3, TrendingUp, PieChart, Upload, FileText } from 'lucide-vue-next'
 
 const props = defineProps<{
   activeNav: string
   activeId: string
+  dashboardView?: string
 }>()
 
 const emit = defineEmits<{
   'select': [id: string]
   'created': [id: string]
+  'dashboard-view': [view: string]
 }>()
 
 const conversations = ref<Conversation[]>([])
@@ -141,7 +144,7 @@ watch(() => props.activeNav, () => {
           :class="{ active: activeId === conv.id }"
           @click="emit('select', conv.id)"
         >
-          <span class="item-icon">💬</span>
+          <MessageSquare class="item-icon" :size="16" />
           <span class="item-title">{{ conv.title }}</span>
           <button class="delete-item-btn" @click="deleteConv(conv.id, $event)">×</button>
         </div>
@@ -154,16 +157,28 @@ watch(() => props.activeNav, () => {
         <span>监控菜单</span>
       </div>
       <div class="items-container">
-        <div class="conv-item active">
-          <span class="item-icon">📊</span>
+        <div
+          class="conv-item"
+          :class="{ active: (dashboardView ?? 'overview') === 'overview' }"
+          @click="emit('dashboard-view', 'overview')"
+        >
+          <BarChart3 class="item-icon" :size="16" />
           <span class="item-title">核心指标监控</span>
         </div>
-        <div class="conv-item" style="cursor: default; opacity: 0.85;">
-          <span class="item-icon">📈</span>
+        <div
+          class="conv-item"
+          :class="{ active: dashboardView === 'line' }"
+          @click="emit('dashboard-view', 'line')"
+        >
+          <TrendingUp class="item-icon" :size="16" />
           <span class="item-title">实时趋势折线</span>
         </div>
-        <div class="conv-item" style="cursor: default; opacity: 0.85;">
-          <span class="item-icon">🧁</span>
+        <div
+          class="conv-item"
+          :class="{ active: dashboardView === 'pie' }"
+          @click="emit('dashboard-view', 'pie')"
+        >
+          <PieChart class="item-icon" :size="16" />
           <span class="item-title">资源配比饼图</span>
         </div>
       </div>
@@ -182,7 +197,7 @@ watch(() => props.activeNav, () => {
         @drop="handleDrop"
       >
         <div v-if="!isUploading" class="upload-inner">
-          <span class="upload-icon">📤</span>
+          <Upload class="upload-icon" :size="28" />
           <span class="upload-text">拖拽文件或点击上传</span>
           <input 
             type="file" 
@@ -203,7 +218,7 @@ watch(() => props.activeNav, () => {
       <div class="docs-list-title">已同步手册 ({{ docsList.length }})</div>
       <div class="docs-container">
         <div v-for="doc in docsList" :key="doc" class="doc-item">
-          <span class="doc-icon">📄</span>
+          <FileText class="doc-icon" :size="16" />
           <span class="doc-name">{{ doc }}</span>
           <span class="doc-badge">已向量化</span>
         </div>
@@ -307,7 +322,9 @@ watch(() => props.activeNav, () => {
 
 .item-icon {
   margin-right: 8px;
-  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .item-title {
@@ -366,8 +383,11 @@ watch(() => props.activeNav, () => {
 }
 
 .upload-icon {
-  font-size: 1.8rem;
   margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
 }
 
 .upload-text {
@@ -426,8 +446,11 @@ watch(() => props.activeNav, () => {
 }
 
 .doc-icon {
-  font-size: 0.9rem;
   margin-right: 8px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--text-secondary);
 }
 
 .doc-name {

@@ -1,6 +1,11 @@
 ﻿<script setup lang="ts">
 import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import type { MetricsData } from '../types'
+import { BarChart3, AlertTriangle, TrendingUp, PieChart } from 'lucide-vue-next'
+
+const props = defineProps<{
+  view?: string
+}>()
 
 const data = ref<MetricsData | null>(null)
 const history = ref<MetricsData[]>([])
@@ -13,6 +18,11 @@ let intervalId: ReturnType<typeof setInterval> | null = null
 // Canvas 元素引用
 const lineCanvas = ref<HTMLCanvasElement | null>(null)
 const pieCanvas = ref<HTMLCanvasElement | null>(null)
+
+// 折线图动画状态
+interface Point { x: number; y: number }
+let prevPoints: Point[] = []
+let animationFrameId: number | null = null
 
 // 触发折线指标切换
 const lineMetricsList = [
@@ -68,8 +78,137 @@ async function fetchMetrics() {
   }
 }
 
-// 采用 HTML5 Canvas 纯手绘折线趋势图
-function drawLineChart() {
+// 缓动函数 (ease-out cubic)
+function easeOutCubic(t: number): number {
+  return 1 - Math.pow(1 - t, 3)
+}
+
+// 计算目标点坐标
+function calcTargetPoints(): Point[] {
+  const canvas = lineCanvas.value
+  if (!canvas) return []
+  const hData = history.value
+  if (hData.length === 0) return []
+
+  const width = canvas.clientWidth
+  const height = canvas.clientHeight
+  const paddingLeft = 45
+  const paddingRight = 15
+  const paddingTop = 20
+  const paddingBottom = 30
+  const chartWidth = width - paddingLeft - paddingRight
+  const chartHeight = height - paddingTop - paddingBottom
+
+  const key = selectedLineMetric.value
+  let maxVal = 100
+  if (key === 'load1m') {
+    const maxLoad = Math.max(...hData.map(d => Number(d.load1m ?? 0)))
+    maxVal = Math.max(maxLoad * 1.2, 2.0)
+  } else if (key === 'network_rx') {
+    const maxNet = Math.max(...hData.map(d => Number(d.network_rx ?? 0)))
+    maxVal = Math.max(maxNet * 1.2, 5.0)
+  }
+
+  return hData.map((d, index) => {
+    const val = Number(d[key] ?? 0)
+    const ratioX = hData.length > 1 ? index / (hData.length - 1) : 0
+    const ratioY = maxVal > 0 ? val / maxVal : 0
+    return {
+      x: paddingLeft + ratioX * chartWidth,
+      y: paddingTop + chartHeight * (1 - ratioY)
+    }
+  })
+}
+
+// 绘制静态背景（网格线 + 轴标签），不含折线
+function drawLineChartBg(ctx: CanvasRenderingContext2D, width: number, height: number) {
+  const paddingLeft = 45
+  const paddingRight = 15
+  const paddingTop = 20
+  const paddingBottom = 30
+  const chartHeight = height - paddingTop - paddingBottom
+
+  const key = selectedLineMetric.value
+  let maxVal = 100
+  if (key === 'load1m') {
+    const maxLoad = Math.max(...history.value.map(d => Number(d.load1m ?? 0)))
+    maxVal = Math.max(maxLoad * 1.2, 2.0)
+  } else if (key === 'network_rx') {
+    const maxNet = Math.max(...history.value.map(d => Number(d.network_rx ?? 0)))
+    maxVal = Math.max(maxNet * 1.2, 5.0)
+  }
+
+  ctx.strokeStyle = getThemeColor('--border-color', 'rgba(0, 0, 0, 0.06)')
+  ctx.lineWidth = 1
+  ctx.font = '10px sans-serif'
+  ctx.fillStyle = getThemeColor('--text-muted', '#86868b')
+
+  const gridLinesCount = 4
+  for (let i = 0; i <= gridLinesCount; i++) {
+    const ratio = i / gridLinesCount
+    const y = paddingTop + chartHeight * (1 - ratio)
+    ctx.beginPath()
+    ctx.moveTo(paddingLeft, y)
+    ctx.lineTo(width - paddingRight, y)
+    ctx.stroke()
+    const labelVal = ratio * maxVal
+    ctx.fillText(labelVal.toFixed(key === 'load1m' ? 1 : 0), 10, y + 4)
+  }
+
+  ctx.fillStyle = getThemeColor('--text-muted', '#86868b')
+  ctx.font = '9px monospace'
+  if (history.value.length > 0) {
+    ctx.fillText('20s前', paddingLeft, height - 10)
+    ctx.fillText('现在', width - paddingRight - 20, height - 10)
+  }
+}
+
+// 绘制折线（给定一组点坐标）
+function drawLineAtPoints(ctx: CanvasRenderingContext2D, points: Point[], width: number, height: number) {
+  if (points.length === 0) return
+
+  const paddingTop = 20
+  const paddingBottom = 30
+  const accentColor = getThemeColor('--accent', '#10a37f')
+
+  // 渐变填充区域
+  const gradient = ctx.createLinearGradient(0, paddingTop, 0, height - paddingBottom)
+  gradient.addColorStop(0, hexToRgbA(accentColor, 0.25))
+  gradient.addColorStop(1, hexToRgbA(accentColor, 0.0))
+
+  ctx.beginPath()
+  ctx.moveTo(points[0].x, height - paddingBottom)
+  for (const p of points) {
+    ctx.lineTo(p.x, p.y)
+  }
+  ctx.lineTo(points[points.length - 1].x, height - paddingBottom)
+  ctx.closePath()
+  ctx.fillStyle = gradient
+  ctx.fill()
+
+  // 绘制折线
+  ctx.beginPath()
+  ctx.moveTo(points[0].x, points[0].y)
+  for (let i = 1; i < points.length; i++) {
+    ctx.lineTo(points[i].x, points[i].y)
+  }
+  ctx.strokeStyle = accentColor
+  ctx.lineWidth = 2.5
+  ctx.stroke()
+
+  // 实心焦点
+  const lastP = points[points.length - 1]
+  ctx.beginPath()
+  ctx.arc(lastP.x, lastP.y, 4, 0, 2 * Math.PI)
+  ctx.fillStyle = accentColor
+  ctx.fill()
+  ctx.strokeStyle = '#fff'
+  ctx.lineWidth = 1.5
+  ctx.stroke()
+}
+
+// 在 Canvas 上绘制一帧
+function renderFrame(points: Point[]) {
   const canvas = lineCanvas.value
   if (!canvas) return
   const ctx = canvas.getContext('2d')
@@ -81,111 +220,56 @@ function drawLineChart() {
   canvas.width = width * dpr
   canvas.height = height * dpr
   ctx.scale(dpr, dpr)
-
   ctx.clearRect(0, 0, width, height)
 
-  const hData = history.value
-  if (hData.length === 0) return
+  drawLineChartBg(ctx, width, height)
+  drawLineAtPoints(ctx, points, width, height)
+}
 
-  const paddingLeft = 45
-  const paddingRight = 15
-  const paddingTop = 20
-  const paddingBottom = 30
+// 主入口：计算目标点，启动动画
+function drawLineChart() {
+  const targetPoints = calcTargetPoints()
+  if (targetPoints.length === 0) return
 
-  const chartWidth = width - paddingLeft - paddingRight
-  const chartHeight = height - paddingTop - paddingBottom
-
-  // 1. 计算当前选中的指标最大值
-  const key = selectedLineMetric.value
-  let maxVal = 100
-  if (key === 'load1m') {
-    const maxLoad = Math.max(...hData.map(d => Number(d.load1m ?? 0)))
-    maxVal = Math.max(maxLoad * 1.2, 2.0)
-  } else if (key === 'network_rx') {
-    const maxNet = Math.max(...hData.map(d => Number(d.network_rx ?? 0)))
-    maxVal = Math.max(maxNet * 1.2, 5.0)
+  // 取消未完成的动画
+  if (animationFrameId !== null) {
+    cancelAnimationFrame(animationFrameId)
+    animationFrameId = null
   }
 
-  // 2. 绘制水平背景网格线
-  ctx.strokeStyle = getThemeColor('--border-color', 'rgba(0, 0, 0, 0.06)')
-  ctx.lineWidth = 1
-  ctx.font = '10px sans-serif'
-  ctx.fillStyle = getThemeColor('--text-muted', '#86868b')
-
-  const gridLinesCount = 4
-  for (let i = 0; i <= gridLinesCount; i++) {
-    const ratio = i / gridLinesCount
-    const y = paddingTop + chartHeight * (1 - ratio)
-    
-    // 绘网格线
-    ctx.beginPath()
-    ctx.moveTo(paddingLeft, y)
-    ctx.lineTo(width - paddingRight, y)
-    ctx.stroke()
-
-    // 绘制 Y 轴数值标签
-    const labelVal = ratio * maxVal
-    ctx.fillText(labelVal.toFixed(key === 'load1m' ? 1 : 0), 10, y + 4)
+  // 首次绘制无动画
+  if (prevPoints.length === 0 || prevPoints.length !== targetPoints.length) {
+    prevPoints = targetPoints
+    renderFrame(targetPoints)
+    return
   }
 
-  // 3. 绘制折线趋势
-  ctx.beginPath()
-  const points = hData.map((d, index) => {
-    const val = Number(d[key] ?? 0)
-    const ratioX = hData.length > 1 ? index / (hData.length - 1) : 0
-    const ratioY = maxVal > 0 ? val / maxVal : 0
-    
-    return {
-      x: paddingLeft + ratioX * chartWidth,
-      y: paddingTop + chartHeight * (1 - ratioY)
+  // 执行缓动动画
+  const duration = 400
+  const startTime = performance.now()
+  const fromPoints = [...prevPoints]
+
+  function animate(now: number) {
+    const elapsed = now - startTime
+    const progress = Math.min(elapsed / duration, 1)
+    const eased = easeOutCubic(progress)
+
+    const interpolated = targetPoints.map((target, i) => ({
+      x: fromPoints[i].x + (target.x - fromPoints[i].x) * eased,
+      y: fromPoints[i].y + (target.y - fromPoints[i].y) * eased
+    }))
+
+    renderFrame(interpolated)
+
+    if (progress < 1) {
+      animationFrameId = requestAnimationFrame(animate)
+    } else {
+      prevPoints = targetPoints
+      animationFrameId = null
     }
-  })
-
-  if (points.length > 0) {
-    // 渐变填充区域
-    const gradient = ctx.createLinearGradient(0, paddingTop, 0, height - paddingBottom)
-    const accentColor = getThemeColor('--accent', '#10a37f')
-    gradient.addColorStop(0, hexToRgbA(accentColor, 0.25))
-    gradient.addColorStop(1, hexToRgbA(accentColor, 0.0))
-
-    ctx.beginPath()
-    ctx.moveTo(points[0].x, height - paddingBottom)
-    for (const p of points) {
-      ctx.lineTo(p.x, p.y)
-    }
-    ctx.lineTo(points[points.length - 1].x, height - paddingBottom)
-    ctx.closePath()
-    ctx.fillStyle = gradient
-    ctx.fill()
-
-    // 绘制外折线
-    ctx.beginPath()
-    ctx.moveTo(points[0].x, points[0].y)
-    for (let i = 1; i < points.length; i++) {
-      ctx.lineTo(points[i].x, points[i].y)
-    }
-    ctx.strokeStyle = accentColor
-    ctx.lineWidth = 2.5
-    ctx.stroke()
-
-    // 绘制实心焦点
-    const lastP = points[points.length - 1]
-    ctx.beginPath()
-    ctx.arc(lastP.x, lastP.y, 4, 0, 2 * Math.PI)
-    ctx.fillStyle = accentColor
-    ctx.fill()
-    ctx.strokeStyle = '#fff'
-    ctx.lineWidth = 1.5
-    ctx.stroke()
   }
 
-  // 4. 绘制 X 轴底部坐标时间
-  ctx.fillStyle = getThemeColor('--text-muted', '#86868b')
-  ctx.font = '9px monospace'
-  if (hData.length > 0) {
-    ctx.fillText('20s前', paddingLeft, height - 10)
-    ctx.fillText('现在', width - paddingRight - 20, height - 10)
-  }
+  animationFrameId = requestAnimationFrame(animate)
 }
 
 // 采用 HTML5 Canvas 纯手绘内存分配环形比例图 (Donut Pie Chart)
@@ -318,11 +402,16 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (intervalId) clearInterval(intervalId)
+  if (animationFrameId !== null) cancelAnimationFrame(animationFrameId)
   window.removeEventListener('resize', drawCharts)
 })
 
 watch(selectedLineMetric, () => {
   nextTick(() => drawLineChart())
+})
+
+watch(() => props.view, () => {
+  nextTick(() => drawCharts())
 })
 </script>
 
@@ -331,7 +420,7 @@ watch(selectedLineMetric, () => {
     <!-- Header -->
     <header class="dashboard-header">
       <div class="header-left">
-        <h2 class="title">📊 系统核心监控指标</h2>
+        <h2 class="title"><BarChart3 :size="20" style="vertical-align: middle; margin-right: 6px;" />系统核心监控指标</h2>
         <p class="subtitle">通过 Prometheus 实时采集的主机物理及虚拟指标诊断中心</p>
       </div>
       <div class="header-right">
@@ -343,12 +432,12 @@ watch(selectedLineMetric, () => {
     <div class="dashboard-scrollable-content">
       <!-- 异常状态显示 -->
       <div v-if="error" class="error-banner">
-        <span class="banner-icon">⚠️</span>
+        <AlertTriangle class="banner-icon" :size="18" />
         <span class="banner-text">{{ error }}</span>
       </div>
 
       <!-- 十大核心指标速览面板 -->
-      <div class="metrics-grid" v-if="data">
+      <div class="metrics-grid" v-if="data && (view === 'overview' || !view)">
         <!-- CPU Card -->
         <div class="grid-card accent">
           <div class="card-head">
@@ -467,11 +556,11 @@ watch(selectedLineMetric, () => {
       </div>
 
       <!-- Canvas 设计图表看板 -->
-      <div class="charts-flex-container" v-if="data">
+      <div class="charts-flex-container" v-if="data" :class="{ 'single-chart': view === 'line' || view === 'pie' }">
         <!-- 核心折线趋势 Canvas -->
-        <div class="chart-box main-trend">
+        <div class="chart-box main-trend" v-show="view !== 'pie'">
           <div class="chart-head-selector">
-            <span class="chart-box-title">📈 实时指标波动历史折线 (最近 20 点)</span>
+            <span class="chart-box-title"><TrendingUp :size="16" style="vertical-align: middle; margin-right: 4px;" />实时指标波动历史折线 (最近 20 点)</span>
             <select v-model="selectedLineMetric" class="metric-selector-dropdown">
               <option v-for="m in availableLineMetrics" :key="m.key" :value="m.key">
                 {{ m.label }}
@@ -484,8 +573,8 @@ watch(selectedLineMetric, () => {
         </div>
 
         <!-- 内存分配 Donut Canvas -->
-        <div class="chart-box memory-pie">
-          <span class="chart-box-title">🍰 内存分配比例分析饼图</span>
+        <div class="chart-box memory-pie" v-show="view !== 'line'">
+          <span class="chart-box-title"><PieChart :size="16" style="vertical-align: middle; margin-right: 4px;" />内存分配比例分析饼图</span>
           <div class="canvas-wrapper">
             <canvas ref="pieCanvas"></canvas>
           </div>
@@ -579,7 +668,10 @@ watch(selectedLineMetric, () => {
 }
 
 .banner-icon {
-  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  color: #e53e3e;
+  flex-shrink: 0;
 }
 
 .banner-text {
@@ -768,5 +860,13 @@ watch(selectedLineMetric, () => {
   left: 0;
   width: 100% !important;
   height: 100% !important;
+}
+
+.charts-flex-container.single-chart {
+  flex: 1;
+}
+
+.charts-flex-container.single-chart .chart-box {
+  flex: 1;
 }
 </style>

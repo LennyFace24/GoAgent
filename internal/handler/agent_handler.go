@@ -13,23 +13,29 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-type ChatStreamHandler struct {
-	service *service.ChatStreamService
+type AgentHandler struct {
+	service *service.AgentService
 }
 
-func NewChatStreamHandler(s *service.ChatStreamService) *ChatStreamHandler {
-	return &ChatStreamHandler{
-		service: s,
-	}
+func NewAgentHandler(s *service.AgentService) *AgentHandler {
+	return &AgentHandler{service: s}
 }
 
-func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
+// Stream 处理统一的流式 Agent 请求，根据 mode 路由到不同 prompt
+func (h *AgentHandler) Stream(c *gin.Context) {
+	mode := c.GetString("agent_mode")
+
 	var req struct {
 		Message        string `json:"message"`
 		ConversationID string `json:"conversation_id"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
+		return
+	}
+
+	if req.Message == "" {
+		c.JSON(400, gin.H{"error": "message 字段不能为空"})
 		return
 	}
 
@@ -45,14 +51,12 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 		conversationID = "default"
 	}
 
-	iter, toolEvents, err := h.service.ChatStream(ctx,
-		sessionID, conversationID, req.Message)
+	iter, toolEvents, err := h.service.Stream(ctx, mode, sessionID, conversationID, req.Message)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return
 	}
 
-	// SSE headers
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
@@ -60,7 +64,6 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 	var fullReply strings.Builder
 	var toolMsgs []*schema.Message
 
-	// goroutine: 读取工具事件，通过 SSE 推送给前端，同时收集用于持久化
 	go func() {
 		for ev := range toolEvents {
 			c.SSEvent("tool", ev)
@@ -92,7 +95,7 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Println("ChatStream: 客户端断开或超时")
+			log.Printf("AgentStream(mode=%s): 客户端断开或超时", mode)
 			return
 		default:
 		}
@@ -134,7 +137,7 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 		}
 	}
 
-	// 构建完整的消息列表：user + tool events + assistant
+	// 持久化对话
 	var convMessages []*schema.Message
 	convMessages = append(convMessages, schema.UserMessage(req.Message))
 	convMessages = append(convMessages, toolMsgs...)
@@ -143,7 +146,7 @@ func (h *ChatStreamHandler) ChatStream(c *gin.Context) {
 }
 
 // PermissionResponse 处理前端的权限确认响应
-func (h *ChatStreamHandler) PermissionResponse(c *gin.Context) {
+func (h *AgentHandler) PermissionResponse(c *gin.Context) {
 	var req struct {
 		ID       string `json:"id"`
 		Approved bool   `json:"approved"`
@@ -157,7 +160,6 @@ func (h *ChatStreamHandler) PermissionResponse(c *gin.Context) {
 	permission.HandleResponse(req.ID, req.Approved)
 
 	if req.Always && req.Approved {
-		// TODO: 持久化 allow 规则到配置文件
 		log.Printf("PermissionResponse: 用户选择始终允许 request=%s", req.ID)
 	}
 

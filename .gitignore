@@ -58,3 +58,6 @@ skills/*
 # mcp config file
 .mcp.json
 .playwright-mcp/
+
+# docs
+docs/
