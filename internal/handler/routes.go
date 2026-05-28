@@ -1,7 +1,7 @@
 package handler
 
 import (
-	"github.com/LennyFace24/MiniAgent/internal/config"
+	"github.com/LennyFace24/MiniAgent/internal/metrics"
 	"github.com/LennyFace24/MiniAgent/internal/service"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
@@ -27,7 +27,9 @@ func SetupHandler(r *gin.Engine) {
 
 	fileService := service.NewFileService()
 
-	toolsHandler, err = tools.NewToolHandler(fileService)
+	collector := metrics.NewCollector()
+
+	toolsHandler, err = tools.NewToolHandler(fileService, collector)
 	if err != nil {
 		panic("初始化工具处理器失败: " + err.Error())
 	}
@@ -36,7 +38,7 @@ func SetupHandler(r *gin.Engine) {
 	agentHandler = NewAgentHandler(agentService)
 	fileHandler = NewFileHandler(fileService)
 	conversationHandler = NewConversationHandler(convStore)
-	metricsHandler = NewMetricsHandler(config.GetConfig().Prometheus.URL)
+	metricsHandler = NewMetricsHandler(collector)
 }
 
 func SetupRoutes(r *gin.Engine) {

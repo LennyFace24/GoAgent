@@ -10,7 +10,5 @@ embedding:
     base_url: https://your-embedding.com/v1
     api_key: your-api-key
     model: your-embedding-model
-prometheus:
-    url: http://prometheus:9090
 chromadb:
     url: http://chromadb:8088

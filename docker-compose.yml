@@ -18,7 +18,6 @@ services:
       - goagent-data:/app/data
     depends_on:
       - chromadb
-      - prometheus
 
   chromadb:
     build: ./chroma
@@ -28,31 +27,6 @@ services:
     volumes:
       - chroma-data:/app/chroma_data
 
-  prometheus:
-    image: prom/prometheus:latest
-    restart: unless-stopped
-    ports:
-      - "9091:9090"
-    volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - prometheus-data:/prometheus
-
-  node_exporter:
-    image: prom/node-exporter:latest
-    restart: unless-stopped
-    ports:
-      - "9100:9100"
-    pid: host
-    volumes:
-      - /proc:/host/proc:ro
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
-    command:
-      - '--path.procfs=/host/proc'
-      - '--path.sysfs=/host/sys'
-      - '--path.rootfs=/rootfs'
-
 volumes:
   goagent-data:
   chroma-data:
-  prometheus-data:

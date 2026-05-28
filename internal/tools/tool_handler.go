@@ -3,7 +3,7 @@ package tools
 import (
 	"fmt"
 
-	"github.com/LennyFace24/MiniAgent/internal/config"
+	"github.com/LennyFace24/MiniAgent/internal/metrics"
 	"github.com/LennyFace24/MiniAgent/internal/task"
 	"github.com/LennyFace24/MiniAgent/internal/tools/basic_tool"
 	"github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
@@ -16,9 +16,7 @@ type ToolHandler struct {
 	CompactTrigger *contexttool.CompactTrigger
 }
 
-func NewToolHandler(fileSearcher extratool.FileSearcher) (*ToolHandler, error) {
-	cfg := config.GetConfig()
-
+func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Collector) (*ToolHandler, error) {
 	taskManager := task.NewTaskManager()
 	taskCreateTool, err := taskManager.CreateTaskTool()
 	if err != nil {
@@ -42,7 +40,7 @@ func NewToolHandler(fileSearcher extratool.FileSearcher) (*ToolHandler, error) {
 		return nil, fmt.Errorf("创建 bash 工具失败: %w", err)
 	}
 
-	healthCheckTool, err := extratool.NewHealthCheckTool(cfg.Prometheus.URL)
+	healthCheckTool, err := extratool.NewHealthCheckTool(collector)
 	if err != nil {
 		return nil, fmt.Errorf("创建 health_check 工具失败: %w", err)
 	}
