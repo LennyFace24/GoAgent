@@ -43,7 +43,7 @@ async function fetchConvs() {
 }
 
 async function createNewConv() {
-  const title = props.activeNav === 'aiops' ? '新诊断任务' : '新会话对话'
+  const title = '新对话'
   try {
     const res = await fetch('/api/conversation', {
       method: 'POST',
@@ -129,10 +129,10 @@ watch(() => props.activeNav, () => {
       />
     </div>
 
-    <!-- 常规对话 / AIOps 诊断会话列表 -->
+    <!-- 对话列表 -->
     <div v-if="activeNav === 'chat' || activeNav === 'aiops'" class="sidebar-list">
       <div class="list-title">
-        <span>{{ activeNav === 'aiops' ? '诊断任务' : '会话列表' }}</span>
+        <span>会话列表</span>
         <button class="new-btn" @click="createNewConv" title="新建会话">+</button>
       </div>
       

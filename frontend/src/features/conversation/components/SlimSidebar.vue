@@ -1,6 +1,6 @@
 ﻿<script setup lang="ts">
 import { ref } from 'vue'
-import { MessageSquare, Activity, BookOpen, BarChart3, Sun, Moon } from 'lucide-vue-next'
+import { MessageSquare, BookOpen, BarChart3, Sun, Moon } from 'lucide-vue-next'
 
 const props = defineProps<{
   activeNav: string
@@ -42,22 +42,12 @@ function toggleTheme() {
     <div class="nav-icons">
       <button
         class="nav-btn"
-        :class="{ active: activeNav === 'chat' }"
+        :class="{ active: activeNav === 'chat' || activeNav === 'aiops' }"
         @click="emit('update:activeNav', 'chat')"
-        title="对话聊天 (Chat)"
+        title="智能对话"
       >
         <MessageSquare class="btn-icon" :size="22" />
-        <span class="btn-tooltip">常规对话</span>
-      </button>
-
-      <button
-        class="nav-btn"
-        :class="{ active: activeNav === 'aiops' }"
-        @click="emit('update:activeNav', 'aiops')"
-        title="智能运维诊断 (AIOps)"
-      >
-        <Activity class="btn-icon" :size="22" />
-        <span class="btn-tooltip">AIOps 诊断</span>
+        <span class="btn-tooltip">智能对话</span>
       </button>
 
       <button

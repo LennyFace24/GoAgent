@@ -7,13 +7,11 @@ import { ref, watch, onMounted, onActivated, onDeactivated, nextTick } from 'vue
 import type { Message, ApiMessage, ApiToolCall } from '../../../shared/types'
 
 const props = defineProps<{
-  mode: string
   conversationId: string
   isMonitorOpen: boolean
 }>()
 
 const emit = defineEmits<{
-  'update:mode': [value: string]
   'update:isMonitorOpen': [value: boolean]
 }>()
 
@@ -22,6 +20,9 @@ const inputText = ref('')
 const isSending = ref(false)
 const msgArea = ref<HTMLElement | null>(null)
 let activeAbort: AbortController | null = null
+
+// 内部管理模式切换，不依赖外部 props.mode
+const chatMode = ref<'chat' | 'aiops'>('aiops')
 
 function scrollToBottom() {
   nextTick(() => {
@@ -131,7 +132,7 @@ async function handleSend() {
   activeAbort = abortCtrl
 
   try {
-    const endpoint = props.mode === 'aiops' ? '/api/ai_ops' : '/api/chat_stream'
+    const endpoint = chatMode.value === 'aiops' ? '/api/ai_ops' : '/api/chat_stream'
     const res = await fetch(endpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -395,6 +396,19 @@ watch(() => props.conversationId, () => {
         <button class="quick-btn" @click="triggerQuickAction('df -h 磁盘水位查询')">
           💾 df -h 磁盘水位查询
         </button>
+      </div>
+
+      <div class="mode-switch-bar">
+        <button
+          class="mode-btn"
+          :class="{ active: chatMode === 'chat' }"
+          @click="chatMode = 'chat'"
+        >💬 自由对话</button>
+        <button
+          class="mode-btn"
+          :class="{ active: chatMode === 'aiops' }"
+          @click="chatMode = 'aiops'"
+        >🩺 运维诊断</button>
       </div>
 
       <div class="input-container">
@@ -708,6 +722,35 @@ watch(() => props.conversationId, () => {
 .quick-btn:hover {
   border-color: var(--accent);
   color: var(--text-primary);
+}
+
+.mode-switch-bar {
+  display: flex;
+  gap: 6px;
+}
+
+.mode-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  padding: 5px 14px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: var(--transition-fast);
+}
+
+.mode-btn:hover {
+  border-color: var(--accent);
+  color: var(--text-primary);
+}
+
+.mode-btn.active {
+  background: var(--accent-dim);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
 }
 
 .input-container {

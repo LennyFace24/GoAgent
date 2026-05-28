@@ -46,7 +46,6 @@ function onDashboardViewChange(view: string): void {
     <keep-alive :include="['ChatWorkspace', 'DashboardView']">
       <ChatWorkspace
         v-if="activeNav !== 'dashboard'"
-        :mode="activeNav"
         :conversationId="activeConversationId"
         v-model:isMonitorOpen="isMonitorOpen"
       />
