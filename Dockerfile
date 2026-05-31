@@ -10,7 +10,7 @@ RUN apk add --no-cache ca-certificates
 WORKDIR /app
 COPY --from=builder /app/goagent .
 COPY --from=builder /app/config.docker.yaml ./config.yaml
-COPY --from=builder /app/skills ./skills
+COPY --from=builder /app/.skills ./skills
 RUN mkdir -p data/conversations
 EXPOSE 8080
 CMD ["./goagent"]
