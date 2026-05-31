@@ -1,0 +1,27 @@
+{
+  "version": "1.0",
+  "servers": {
+    "example-stdio": {
+      "enabled": false,
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "mcp-conv2prompt"],
+      "env": {},
+      "description": "示例：本地 stdio 服务"
+    },
+    "example-sse": {
+      "enabled": false,
+      "transport": "sse",
+      "url": "http://localhost:8080/sse",
+      "headers": {},
+      "description": "示例：远程 SSE 服务"
+    },
+    "example-websocket": {
+      "enabled": false,
+      "transport": "websocket",
+      "url": "ws://localhost:8080/ws",
+      "headers": {},
+      "description": "示例：WebSocket 服务"
+    }
+  }
+}

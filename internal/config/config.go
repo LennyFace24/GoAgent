@@ -19,12 +19,12 @@ type Config struct {
 		Port string `yaml:"port"`
 	} `yaml:"server"`
 	Llm struct {
-		BaseUrl      string `yaml:"base_url"`
-		ApiKey       string `yaml:"api_key"`
-		Model        string `yaml:"model"`
-		MaxTokens    int    `yaml:"max_completion_tokens"`
+		BaseUrl   string `yaml:"base_url"`
+		ApiKey    string `yaml:"api_key"`
+		Model     string `yaml:"model"`
+		MaxTokens int    `yaml:"max_completion_tokens"`
 	} `yaml:"llm"`
-	Embedding struct{
+	Embedding struct {
 		BaseUrl string `yaml:"base_url"`
 		ApiKey  string `yaml:"api_key"`
 		Model   string `yaml:"model"`
