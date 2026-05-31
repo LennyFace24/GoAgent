@@ -19,11 +19,7 @@ const conversations = ref<Conversation[]>([])
 const searchQuery = ref('')
 const isUploading = ref(false)
 const uploadProgress = ref(0)
-const docsList = ref<string[]>([
-  'RAG 运维手册.md',
-  'Prometheus指标查询规范.txt',
-  '故障排查黄金定律.pdf'
-])
+const docsList = ref<string[]>([])
 
 async function fetchConvs() {
   try {
