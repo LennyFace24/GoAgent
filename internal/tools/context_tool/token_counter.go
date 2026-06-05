@@ -28,6 +28,24 @@ const (
 
 // ShouldCompact 判断是否需要压缩，返回压缩级别
 func ShouldCompact(messages []*schema.Message) CompactLevel {
+	// 使用全局状态管理器
+	state := GetContextState()
+	usage := state.GetUsage()
+
+	// 如果状态管理器有数据，使用百分比判断
+	if usage.CurrentTokens > 0 {
+		// 超过 90% 触发完整压缩
+		if usage.Percentage > 90 {
+			return CompactFull
+		}
+		// 超过 70% 触发微压缩
+		if usage.Percentage > 70 {
+			return CompactMicro
+		}
+		return CompactNone
+	}
+
+	// 回退：手动计算
 	totalChars := 0
 	for _, m := range messages {
 		totalChars += len(m.Content)
@@ -42,6 +60,8 @@ func ShouldCompact(messages []*schema.Message) CompactLevel {
 	}
 
 	tokens := EstimateTokens(messages)
+	state.SetTokens(int64(tokens))
+
 	if tokens > CompactThreshold {
 		return CompactFull
 	}

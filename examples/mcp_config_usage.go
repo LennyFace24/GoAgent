@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -8,62 +9,43 @@ import (
 )
 
 func main() {
-	// 1. 初始化配置目录
-	fmt.Println("初始化配置目录...")
-	if err := mcp.InitConfigDir(); err != nil {
-		log.Fatalf("初始化配置目录失败: %v", err)
-	}
-
-	// 2. 加载配置
-	fmt.Println("加载 MCP 配置...")
-	mcpConfig, err := mcp.LoadMCPConfig()
-	if err != nil {
-		log.Fatalf("加载配置失败: %v", err)
-	}
-
-	// 3. 显示配置信息
-	fmt.Printf("配置版本: %s\n", mcpConfig.Version)
-	fmt.Printf("服务器数量: %d\n", len(mcpConfig.Servers))
-
-	// 4. 获取启用的服务器
-	enabled := mcpConfig.GetEnabledServers()
-	fmt.Printf("启用的服务器: %d\n", len(enabled))
-
-	for name, server := range enabled {
-		fmt.Printf("  - %s: %s (%s)\n", name, server.Description, server.Transport)
-	}
-
-	// 5. 使用管理器动态添加服务器
-	fmt.Println("\n使用管理器添加新服务器...")
+	// 1. 创建管理器并初始化
+	fmt.Println("初始化 MCP 管理器...")
 	manager := mcp.NewMCPManager()
-	manager.LoadFromConfig(mcpConfig)
-
-	newServer := &mcp.MCPServerConfig{
-		Enabled:     true,
-		Transport:   mcp.TransportStdio,
-		Command:     "node",
-		Args:        []string{"server.js"},
-		Description: "动态添加的服务器",
+	if err := manager.Init(); err != nil {
+		log.Fatalf("初始化失败: %v", err)
 	}
 
-	if err := manager.AddServer("dynamic-server", newServer); err != nil {
-		fmt.Printf("添加服务器失败: %v\n", err)
-	} else {
-		fmt.Println("成功添加服务器: dynamic-server")
+	// 2. 显示状态
+	manager.PrintStatus()
+
+	// 3. 连接所有启用的服务器
+	ctx := context.Background()
+	fmt.Println("连接启用的服务器...")
+	if err := manager.ConnectAll(ctx); err != nil {
+		log.Printf("部分连接失败: %v", err)
 	}
 
-	// 6. 列出所有服务器
-	fmt.Println("\n所有服务器:")
-	for name, server := range manager.GetAllServers() {
-		status := "禁用"
-		if server.Enabled {
-			status = "启用"
+	// 4. 再次显示状态
+	manager.PrintStatus()
+
+	// 5. 列出工具（如果有连接的服务器）
+	sessions := manager.GetAllSessions()
+	for name, session := range sessions {
+		fmt.Printf("\n服务器 %s 的工具:\n", name)
+		tools, err := manager.ListTools(ctx, name)
+		if err != nil {
+			log.Printf("获取工具失败: %v", err)
+			continue
 		}
-		fmt.Printf("  - %s [%s]: %s\n", name, status, server.Description)
+		for _, t := range tools {
+			fmt.Printf("  - %s: %s\n", t.Name, t.Description)
+		}
+		_ = session
 	}
 
-	// 7. 显示配置文件位置
+	// 6. 显示配置文件位置
 	configPath, _ := mcp.GetMCPConfigPath()
 	fmt.Printf("\n配置文件位置: %s\n", configPath)
-	fmt.Println("\n提示: 编辑配置文件后，重启程序或调用 Reload() 方法重新加载配置")
+	fmt.Println("\n提示: 编辑配置文件后，调用 manager.Reload() 重新加载配置")
 }

@@ -5,6 +5,7 @@ import (
 	"github.com/LennyFace24/MiniAgent/internal/service"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
+	"github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/gin-gonic/gin"
 )
 
@@ -57,6 +58,16 @@ func SetupRoutes(r *gin.Engine) {
 		api.GET("/conversation/:id", conversationHandler.GetConversation)
 		api.DELETE("/conversation/:id", conversationHandler.DeleteConversation)
 	}
+
+	// 上下文状态查询
+	r.GET("/context", getContextStatus)
+}
+
+// getContextStatus 获取上下文使用状态
+func getContextStatus(c *gin.Context) {
+	state := contexttool.GetContextState()
+	usage := state.GetUsage()
+	c.JSON(200, usage)
 }
 
 // setAgentMode 中间件：在 gin.Context 中注入 agent 模式

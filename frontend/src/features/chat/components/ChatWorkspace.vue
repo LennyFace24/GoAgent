@@ -5,6 +5,7 @@ export default { name: 'ChatWorkspace' }
 <script setup lang="ts">
 import { ref, watch, onMounted, onActivated, onDeactivated, nextTick } from 'vue'
 import type { Message, ApiMessage, ApiToolCall } from '../../../shared/types'
+import ContextStatus from './ContextStatus.vue'
 
 const props = defineProps<{
   conversationId: string
@@ -318,13 +319,16 @@ watch(() => props.conversationId, () => {
         <span class="active-title">运维控制台</span>
         <span class="model-badge">GoAgent Copilot</span>
       </div>
-      <button
-        class="monitor-toggle-btn"
-        :class="{ active: isMonitorOpen }"
-        @click="emit('update:isMonitorOpen', !isMonitorOpen)"
-      >
-        实时系统状态
-      </button>
+      <div class="header-actions">
+        <ContextStatus />
+        <button
+          class="monitor-toggle-btn"
+          :class="{ active: isMonitorOpen }"
+          @click="emit('update:isMonitorOpen', !isMonitorOpen)"
+        >
+          实时系统状态
+        </button>
+      </div>
     </div>
 
     <div class="message-area" ref="msgArea">
@@ -467,6 +471,12 @@ watch(() => props.conversationId, () => {
   padding: 2px 8px;
   border-radius: var(--radius-sm);
   font-weight: 500;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .monitor-toggle-btn {

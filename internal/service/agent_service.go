@@ -134,6 +134,10 @@ func (s *AgentService) runLoop(
 	for {
 		turn++
 
+		// 更新上下文状态
+		contextState := contexttool.GetContextState()
+		contextState.EstimateAndEstimateMessages(messages)
+
 		// compact 检查
 		level := contexttool.ShouldCompact(messages)
 		if s.compactTrigger.IsTriggered() {

@@ -74,6 +74,11 @@ func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Colle
 		return nil, fmt.Errorf("创建 compact 工具失败: %w", err)
 	}
 
+	contextStatusTool, err := contexttool.NewContextStatusTool()
+	if err != nil {
+		return nil, fmt.Errorf("创建 context_status 工具失败: %w", err)
+	}
+
 	return &ToolHandler{
 		tools: []tool.BaseTool{
 			bashTool,
@@ -84,6 +89,7 @@ func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Colle
 			knowledgeTool,
 			subProxyTool,
 			compactTool,
+			contextStatusTool,
 			taskCreateTool,
 			taskUpdateStatusTool,
 			taskGetTool,
