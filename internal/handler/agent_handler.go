@@ -117,6 +117,10 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 		}
 
 		if mv.IsStreaming && mv.MessageStream != nil {
+			// 发送 thinking 事件，告诉前端 AI 开始生成
+			c.SSEvent("thinking", gin.H{})
+			c.Writer.Flush()
+
 			for {
 				chunk, err := mv.MessageStream.Recv()
 				if err != nil {

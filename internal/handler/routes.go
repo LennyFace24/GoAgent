@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/LennyFace24/MiniAgent/internal/commands"
 	"github.com/LennyFace24/MiniAgent/internal/metrics"
 	"github.com/LennyFace24/MiniAgent/internal/service"
 	"github.com/LennyFace24/MiniAgent/internal/store"
@@ -57,10 +58,20 @@ func SetupRoutes(r *gin.Engine) {
 		api.POST("/conversation", conversationHandler.CreateConversation)
 		api.GET("/conversation/:id", conversationHandler.GetConversation)
 		api.DELETE("/conversation/:id", conversationHandler.DeleteConversation)
+
+		// 斜杠命令列表
+		api.GET("/commands", getCommands)
 	}
 
 	// 上下文状态查询
 	r.GET("/context", getContextStatus)
+}
+
+// getCommands 获取斜杠命令列表
+func getCommands(c *gin.Context) {
+	registry := commands.GetRegistry()
+	cmds := registry.List()
+	c.JSON(200, gin.H{"commands": cmds})
 }
 
 // getContextStatus 获取上下文使用状态

@@ -3,9 +3,14 @@ export default { name: 'ChatWorkspace' }
 </script>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onActivated, onDeactivated, nextTick } from 'vue'
-import type { Message, ApiMessage, ApiToolCall } from '../../../shared/types'
+import { ref, watch, onMounted, onActivated, nextTick } from 'vue'
 import ContextStatus from './ContextStatus.vue'
+import CommandPalette from './CommandPalette.vue'
+import { useCommands, type Command } from '../composables/useCommands'
+import { useChat } from '../composables/useChat'
+import { Wrench, CheckCircle, Lock, ChevronUp, ChevronDown } from 'lucide-vue-next'
+
+// ---------- Props & Emits ----------
 
 const props = defineProps<{
   conversationId: string
@@ -16,14 +21,45 @@ const emit = defineEmits<{
   'update:isMonitorOpen': [value: boolean]
 }>()
 
-const messages = ref<Message[]>([])
-const inputText = ref('')
-const isSending = ref(false)
-const msgArea = ref<HTMLElement | null>(null)
-let activeAbort: AbortController | null = null
+// ---------- 状态 ----------
 
-// 内部管理模式切换，不依赖外部 props.mode
+const messages = ref<any[]>([])
+const inputText = ref('')
+const msgArea = ref<HTMLElement | null>(null)
 const chatMode = ref<'chat' | 'aiops'>('aiops')
+
+// ---------- Composables ----------
+
+const { isSending, send, abort, loadHistory } = useChat({
+  messages,
+  conversationId: ref(props.conversationId),
+  chatMode,
+  scrollToBottom,
+})
+
+const {
+  visible: paletteVisible,
+  selectedIndex: commandSelectedIndex,
+  filteredCommands,
+  updateFromInput,
+  onKeydown: onCommandKeydown,
+  selectCommand,
+} = useCommands()
+
+// ---------- 监听 ----------
+
+watch(inputText, (val) => {
+  updateFromInput(val)
+})
+
+watch(() => props.conversationId, () => {
+  abort()
+  loadHistory(DEFAULT_WELCOME)
+})
+
+// ---------- 工具函数 ----------
+
+const DEFAULT_WELCOME = '您好，我是您的智能运维助手！您可以输入问题进行分析，或者点击右上角查看 🖥️ 实时系统状态 面板。'
 
 function scrollToBottom() {
   nextTick(() => {
@@ -38,240 +74,111 @@ function triggerQuickAction(text: string) {
   handleSend()
 }
 
-// 从后端加载对话历史
-async function loadHistory() {
-  messages.value = []
-  try {
-    const res = await fetch(`/api/conversation/${props.conversationId}`)
-    if (!res.ok) {
-      messages.value.push({
-        id: Date.now(),
-        role: 'assistant',
-        content: '您好，我是您的智能运维助手！您可以输入问题进行分析，或者点击右上角查看 🖥️ 实时系统状态 面板。'
-      })
-      return
-    }
-    const data = await res.json()
-    const lines: ApiMessage[] = data.messages || []
-    for (const line of lines) {
-      if (line.role === 'user') {
-        messages.value.push({
-          id: Date.now() + Math.random(),
-          role: 'user',
-          content: line.content,
-        })
-      } else if (line.role === 'assistant') {
-        if (line.tool_calls) {
-          for (const tc of line.tool_calls) {
-            messages.value.push({
-              id: Date.now() + Math.random(),
-              role: 'tool_call',
-              name: tc.function.name,
-              args: tc.function.arguments,
-              callId: tc.id,
-            })
-          }
-        }
-        if (line.content) {
-          messages.value.push({
-            id: Date.now() + Math.random(),
-            role: 'assistant',
-            content: line.content,
-          })
-        }
-      } else if (line.role === 'tool') {
-        messages.value.push({
-          id: Date.now() + Math.random(),
-          role: 'tool_result',
-          name: line.tool_name || '',
-          result: line.content,
-          callId: line.tool_call_id || '',
-        })
-      }
-    }
-    if (messages.value.length === 0) {
-      messages.value.push({
-        id: Date.now(),
-        role: 'assistant',
-        content: '您好，我是您的智能运维助手！您可以输入问题进行分析，或者点击右上角查看 🖥️ 实时系统状态 面板。'
-      })
-    }
-  } catch {
-    messages.value.push({
-      id: Date.now(),
-      role: 'assistant',
-      content: '您好，我是您的智能运维助手！您可以输入问题进行分析，或者点击右上角查看 🖥️ 实时系统状态 面板。'
-    })
+// ---------- 命令处理 ----------
+
+function onCommandSelect(cmd: Command): void {
+  const name = selectCommand(cmd)
+  executeCommand(name)
+}
+
+function executeCommand(name: string): void {
+  switch (name) {
+    case 'clear':
+      messages.value = []
+      inputText.value = ''
+      break
+    case 'new':
+      inputText.value = ''
+      send('/new')
+      break
+    case 'compact':
+      inputText.value = ''
+      send('/compact')
+      break
+    case 'context':
+      showContextStatus()
+      inputText.value = ''
+      break
+    case 'help':
+      showHelp()
+      inputText.value = ''
+      break
+    case 'model':
+      showModelInfo()
+      inputText.value = ''
+      break
+    default:
+      inputText.value = `/${name} `
+      break
   }
 }
 
-async function handleSend() {
-  if (!inputText.value.trim() || isSending.value) return
+// ---------- 内置命令 ----------
 
-  const userText = inputText.value
-  inputText.value = ''
+async function showContextStatus() {
+  try {
+    const res = await fetch('/context')
+    if (res.ok) {
+      const data = await res.json()
+      messages.value.push({
+        id: Date.now(),
+        role: 'assistant',
+        content: `📊 **上下文状态**\n\n- Token 使用: ${data.current_tokens.toLocaleString()} / ${data.max_tokens.toLocaleString()} (${data.percentage.toFixed(1)}%)\n- 消息数量: ${data.message_count}\n- 状态: ${data.percentage > 90 ? '🔴 危险' : data.percentage > 70 ? '🟡 警告' : '🟢 正常'}`,
+      })
+    }
+  } catch { /* ignore */ }
+}
 
+function showHelp() {
   messages.value.push({
     id: Date.now(),
-    role: 'user',
-    content: userText
-  })
-  scrollToBottom()
-
-  isSending.value = true
-
-  const aiMessageId = Date.now() + 1
-  messages.value.push({
-    id: aiMessageId,
     role: 'assistant',
-    content: '',
-    isThinking: true
+    content: `📖 **可用命令**
+
+| 命令 | 说明 |
+|------|------|
+| /help | 显示此帮助信息 |
+| /clear | 清空当前对话 |
+| /new | 新建对话 |
+| /compact | 触发上下文压缩 |
+| /context | 显示上下文状态 |
+| /model | 显示模型信息 |
+
+输入 \`/\` 可快速选择命令。`,
   })
-  scrollToBottom()
+}
 
-  const abortCtrl = new AbortController()
-  activeAbort = abortCtrl
+function showModelInfo() {
+  messages.value.push({
+    id: Date.now(),
+    role: 'assistant',
+    content: `🤖 **当前模式**: ${chatMode.value === 'aiops' ? '运维诊断' : '自由对话'}\n\n模型信息可通过系统监控面板查看。`,
+  })
+}
 
-  try {
-    const endpoint = chatMode.value === 'aiops' ? '/api/ai_ops' : '/api/chat_stream'
-    const res = await fetch(endpoint, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: userText, conversation_id: props.conversationId }),
-      signal: abortCtrl.signal,
-    })
+// ---------- 输入处理 ----------
 
-    if (!res.ok) {
-      const aiMsg = messages.value.find(m => m.id === aiMessageId)
-      if (aiMsg) {
-        aiMsg.isThinking = false
-        aiMsg.content = `[HTTP ${res.status}] 请求失败`
-      }
-      return
-    }
-
-    const reader = res.body!.getReader()
-    const decoder = new TextDecoder()
-    let buffer = ''
-
-    while (true) {
-      if (abortCtrl.signal.aborted) {
-        reader.cancel()
-        break
-      }
-
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
-
-      let currentEvent = ''
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i]
-        if (line.startsWith('event:')) {
-          currentEvent = line.slice(6).trim()
-          continue
-        }
-        if (!line.startsWith('data:')) continue
-        const payload = line.slice(5).trim()
-        if (!payload) continue
-
-        if (currentEvent === 'delta') {
-          try {
-            const data = JSON.parse(payload)
-            const aiMsg = messages.value.find(m => m.id === aiMessageId)
-            if (aiMsg && data.content) {
-              aiMsg.isThinking = false
-              aiMsg.content = (aiMsg.content || '') + data.content
-            }
-          } catch { /* ignore */ }
-          scrollToBottom()
-
-        } else if (currentEvent === 'message') {
-          try {
-            const data = JSON.parse(payload)
-            const aiMsg = messages.value.find(m => m.id === aiMessageId)
-            if (aiMsg && data.content) {
-              aiMsg.isThinking = false
-              aiMsg.content = data.content
-            }
-          } catch { /* ignore */ }
-          scrollToBottom()
-
-        } else if (currentEvent === 'tool') {
-          try {
-            const ev = JSON.parse(payload)
-            if (ev.type === 'tool_call') {
-              const aiMsg = messages.value.find(m => m.id === aiMessageId)
-              if (aiMsg) aiMsg.isThinking = false
-
-              messages.value.push({
-                id: Date.now() + Math.random(),
-                role: 'tool_call',
-                name: ev.name,
-                args: ev.args,
-                callId: ev.call_id,
-              })
-            } else if (ev.type === 'tool_result') {
-              messages.value.push({
-                id: Date.now() + Math.random(),
-                role: 'tool_result',
-                name: ev.name,
-                result: ev.result,
-                callId: ev.call_id,
-              })
-            } else if (ev.type === 'permission_request') {
-              messages.value.push({
-                id: Date.now() + Math.random(),
-                role: 'permission_req',
-                name: ev.name,
-                args: ev.args,
-                requestId: ev.request_id,
-                reason: ev.reason,
-                callId: ev.call_id,
-                responded: false,
-              })
-            }
-          } catch { /* ignore */ }
-          scrollToBottom()
-
-        } else if (currentEvent === 'done') {
-          const aiMsg = messages.value.find(m => m.id === aiMessageId)
-          if (aiMsg) aiMsg.isThinking = false
-        } else if (currentEvent === 'error') {
-          try {
-            const data = JSON.parse(payload)
-            const aiMsg = messages.value.find(m => m.id === aiMessageId)
-            if (aiMsg) {
-              aiMsg.isThinking = false
-              aiMsg.content = (aiMsg.content || '') + `\n\n[错误: ${data.error}]`
-            }
-          } catch { /* ignore */ }
-        }
-      }
-    }
-  } catch (e) {
-    if (abortCtrl.signal.aborted) return
-    const aiMsg = messages.value.find(m => m.id === aiMessageId)
-    if (aiMsg) {
-      aiMsg.isThinking = false
-      aiMsg.content = (aiMsg.content || '') + `\n\n[连接断开: ${e instanceof Error ? e.message : String(e)}]`
-    }
-  } finally {
-    if (!abortCtrl.signal.aborted) {
-      const aiMsg = messages.value.find(m => m.id === aiMessageId)
-      if (aiMsg) aiMsg.isThinking = false
-    }
-    if (activeAbort === abortCtrl) {
-      activeAbort = null
-    }
-    isSending.value = false
+function onInputKeydown(e: KeyboardEvent): void {
+  if (paletteVisible.value) {
+    const handled = onCommandKeydown(e)
+    if (handled) return
+  }
+  if (e.key === 'Enter' && !e.shiftKey) {
+    e.preventDefault()
+    handleSend()
   }
 }
 
-async function respondPermission(msg: Message, approved: boolean) {
+function handleSend(): void {
+  const text = inputText.value.trim()
+  if (!text) return
+  inputText.value = ''
+  send(text)
+}
+
+// ---------- 权限响应 ----------
+
+async function respondPermission(msg: any, approved: boolean) {
   if (msg.role !== 'permission_req' || !msg.requestId) return
   msg.responded = true
   try {
@@ -283,37 +190,27 @@ async function respondPermission(msg: Message, approved: boolean) {
   } catch { /* ignore */ }
 }
 
+// ---------- 工具折叠 ----------
+
 const expandedTools = ref<Record<number, boolean>>({})
 function toggleTool(index: number) {
   expandedTools.value[index] = !expandedTools.value[index]
 }
 
+// ---------- 生命周期 ----------
+
 onMounted(() => {
-  loadHistory()
+  loadHistory(DEFAULT_WELCOME)
 })
 
-// keep-alive: 失活时中止进行中的 SSE 连接
-onDeactivated(() => {
-  if (activeAbort) {
-    activeAbort.abort()
-    activeAbort = null
-  }
-})
-
-// keep-alive: 重新激活时刷新历史（可能在其他模块切换了对话）
 onActivated(() => {
-  loadHistory()
-})
-
-watch(() => props.conversationId, () => {
-  if (activeAbort) activeAbort.abort()
-  isSending.value = false
-  loadHistory()
+  loadHistory(DEFAULT_WELCOME)
 })
 </script>
 
 <template>
   <div class="chat-workspace">
+    <!-- Header -->
     <div class="workspace-header">
       <div class="header-info">
         <span class="active-title">运维控制台</span>
@@ -331,77 +228,84 @@ watch(() => props.conversationId, () => {
       </div>
     </div>
 
+    <!-- Messages -->
     <div class="message-area" ref="msgArea">
       <div v-for="(msg, index) in messages" :key="msg.id" class="message-row">
-
+        <!-- User Message -->
         <div v-if="msg.role === 'user'" class="bubble user">
           {{ msg.content }}
         </div>
 
+        <!-- Assistant Message -->
         <div v-else-if="msg.role === 'assistant'" class="bubble assistant">
           <div v-if="msg.isThinking" class="thinking-loader">
             <span class="loader-dot"></span>
             <span class="loader-dot"></span>
             <span class="loader-dot"></span>
           </div>
-          <div v-else class="markdown-body">
+          <div v-else-if="msg.isGenerating || msg.content" class="markdown-body">
             {{ msg.content }}
-            <span v-if="isSending && index === messages.length - 1" class="blinking-cursor">|</span>
+            <span v-if="msg.isGenerating" class="blinking-cursor">|</span>
           </div>
         </div>
 
+        <!-- Tool Call -->
         <div v-else-if="msg.role === 'tool_call'" class="toolchain-block">
           <div class="toolchain-header" @click="toggleTool(index)">
-            <span class="tool-status-icon">⚙️</span>
+            <Wrench :size="14" class="tool-status-icon" />
             <span class="tool-summary">AI 正在调度工具: <strong>{{ msg.name }}</strong></span>
-            <span class="accordion-arrow">{{ expandedTools[index] ? '▲' : '▼' }}</span>
+            <component :is="expandedTools[index] ? ChevronUp : ChevronDown" :size="14" class="accordion-arrow" />
           </div>
           <div v-if="expandedTools[index]" class="toolchain-detail">
             <pre class="code-pre">参数: {{ msg.args }}</pre>
           </div>
         </div>
 
+        <!-- Tool Result -->
         <div v-else-if="msg.role === 'tool_result'" class="toolchain-block result">
           <div class="toolchain-header" @click="toggleTool(index)">
-            <span class="tool-status-icon success">✅</span>
+            <CheckCircle :size="14" class="tool-status-icon success" />
             <span class="tool-summary">工具 <strong>{{ msg.name }}</strong> 执行完成</span>
-            <span class="accordion-arrow">{{ expandedTools[index] ? '▲' : '▼' }}</span>
+            <component :is="expandedTools[index] ? ChevronUp : ChevronDown" :size="14" class="accordion-arrow" />
           </div>
           <div v-if="expandedTools[index]" class="toolchain-detail">
-            <pre class="code-pre">结果: {{ msg.result }}</pre>
+            <pre class="code-pre">{{ msg.result }}</pre>
           </div>
         </div>
 
-        <div v-else-if="msg.role === 'permission_req'" class="permission-card">
-          <div class="perm-header">
-            <span class="perm-icon">🔐</span>
-            <span>工具 <strong>{{ msg.name }}</strong> 请求授权</span>
+        <!-- Permission Request -->
+        <div v-else-if="msg.role === 'permission_req'" class="toolchain-block permission">
+          <div class="toolchain-header">
+            <Lock :size="14" class="tool-status-icon" />
+            <span class="tool-summary">权限请求: <strong>{{ msg.name }}</strong></span>
           </div>
-          <div v-if="msg.reason" class="perm-reason">{{ msg.reason }}</div>
-          <pre v-if="msg.args" class="code-pre perm-args">参数: {{ msg.args }}</pre>
-          <div v-if="!msg.responded" class="perm-actions">
-            <button class="perm-btn approve" @click="respondPermission(msg, true)">批准</button>
-            <button class="perm-btn deny" @click="respondPermission(msg, false)">拒绝</button>
+          <div class="toolchain-detail">
+            <p class="perm-reason">{{ msg.reason }}</p>
+            <div class="perm-actions" v-if="!msg.responded">
+              <button class="perm-btn deny" @click="respondPermission(msg, false)">拒绝</button>
+              <button class="perm-btn allow" @click="respondPermission(msg, true)">允许</button>
+            </div>
+            <p v-else class="perm-status">已响应</p>
           </div>
-          <div v-else class="perm-status">已{{ msg.approved ? '批准' : '拒绝' }}</div>
         </div>
-
       </div>
     </div>
 
+    <!-- Quick Actions -->
     <div class="input-section">
-      <div v-if="messages.length <= 1" class="quick-actions">
-        <button class="quick-btn" @click="triggerQuickAction('🩺 一键全盘健康诊断')">
-          🩺 一键全盘健康诊断
+      <div class="quick-actions">
+        <button class="quick-btn" @click="triggerQuickAction('查看当前服务器 CPU 和内存使用情况')">
+          🖥️ 服务器 CPU/内存诊断
         </button>
-        <button class="quick-btn" @click="triggerQuickAction('📚 检索知识库中的运维规范')">
-          📚 检索知识库中的运维规范
+        <button class="quick-btn" @click="triggerQuickAction('列出最近 10 条系统错误日志')">
+          📋 查看最近错误日志
         </button>
         <button class="quick-btn" @click="triggerQuickAction('df -h 磁盘水位查询')">
           💾 df -h 磁盘水位查询
         </button>
       </div>
 
+      <!-- Mode Switch -->
       <div class="mode-switch-bar">
         <button
           class="mode-btn"
@@ -415,15 +319,23 @@ watch(() => props.conversationId, () => {
         >🩺 运维诊断</button>
       </div>
 
+      <!-- Input -->
       <div class="input-container">
-        <textarea
-          v-model="inputText"
-          @keydown.enter.prevent="handleSend"
-          placeholder="向 AI 助理提问或下达运维诊断指令... (Enter 发送)"
-          class="smart-textarea"
-          rows="1"
-        ></textarea>
-        <button class="send-btn" :disabled="isSending" @click="handleSend">
+        <div class="input-wrapper">
+          <CommandPalette
+            :commands="filteredCommands"
+            :selectedIndex="commandSelectedIndex"
+            @select="onCommandSelect"
+          />
+          <textarea
+            v-model="inputText"
+            @keydown="onInputKeydown"
+            placeholder="向 AI 助理提问或下达运维诊断指令... 输入 / 查看可用命令"
+            class="smart-textarea"
+            rows="1"
+          ></textarea>
+        </div>
+        <button class="send-btn" :disabled="!inputText.trim() || isSending" @click="handleSend">
           {{ isSending ? '...' : '发送' }}
         </button>
       </div>
@@ -441,6 +353,7 @@ watch(() => props.conversationId, () => {
   position: relative;
 }
 
+/* Header */
 .workspace-header {
   height: 60px;
   border-bottom: 1px solid var(--border-color);
@@ -467,10 +380,9 @@ watch(() => props.conversationId, () => {
   font-size: 0.65rem;
   background: var(--bg-hover);
   border: 1px solid var(--border-color);
-  color: var(--text-secondary);
   padding: 2px 8px;
-  border-radius: var(--radius-sm);
-  font-weight: 500;
+  border-radius: 6px;
+  color: var(--text-muted);
 }
 
 .header-actions {
@@ -491,16 +403,18 @@ watch(() => props.conversationId, () => {
   transition: var(--transition-fast);
 }
 
-.monitor-toggle-btn:hover, .monitor-toggle-btn.active {
+.monitor-toggle-btn:hover,
+.monitor-toggle-btn.active {
   background: var(--accent);
   color: white;
   border-color: var(--accent);
 }
 
+/* Messages */
 .message-area {
   flex: 1;
-  padding: 24px 40px;
   overflow-y: auto;
+  padding: 24px 32px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -512,42 +426,43 @@ watch(() => props.conversationId, () => {
 }
 
 .bubble {
-  max-width: 80%;
-  padding: 12px 18px;
-  border-radius: var(--radius-lg);
-  font-size: 0.88rem;
-  line-height: 1.5;
-  word-wrap: break-word;
+  max-width: 85%;
+  padding: 12px 16px;
+  border-radius: 12px;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .bubble.user {
   align-self: flex-end;
-  background: var(--bg-chat-bubble-user);
+  background: var(--accent);
   color: white;
   border-bottom-right-radius: 4px;
-  box-shadow: var(--shadow-sm);
 }
 
 .bubble.assistant {
   align-self: flex-start;
-  background: var(--bg-chat-bubble);
+  background: var(--bg-secondary);
   color: var(--text-primary);
   border-bottom-left-radius: 4px;
   border: 1px solid var(--border-color);
-  box-shadow: var(--shadow-sm);
 }
 
+/* Thinking Loader */
 .thinking-loader {
   display: flex;
-  gap: 4px;
+  gap: 6px;
   padding: 4px 0;
 }
 
 .loader-dot {
-  width: 6px; height: 6px;
-  background: var(--text-muted);
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
-  animation: bounce 1.4s infinite ease-in-out both;
+  background: var(--text-muted);
+  animation: bounce 1.4s infinite ease-in-out;
 }
 
 .loader-dot:nth-child(1) { animation-delay: -0.32s; }
@@ -559,108 +474,76 @@ watch(() => props.conversationId, () => {
 }
 
 .blinking-cursor {
-  font-weight: 700;
-  color: var(--accent);
-  animation: blink 1s step-end infinite;
+  animation: blink 1s infinite;
 }
 
 @keyframes blink {
-  from, to { color: transparent }
-  50% { color: var(--accent) }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
+/* Tool Blocks */
 .toolchain-block {
   align-self: flex-start;
-  width: 100%;
-  max-width: 600px;
-  background: var(--bg-input);
+  max-width: 85%;
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
-  border-radius: var(--radius-md);
-  margin: 6px 0;
+  border-radius: 10px;
   overflow: hidden;
 }
 
-.toolchain-block.result {
-  background: rgba(16, 163, 127, 0.02);
-}
-
 .toolchain-header {
-  padding: 10px 14px;
   display: flex;
   align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
   cursor: pointer;
-  user-select: none;
+  transition: background var(--transition-fast);
+}
+
+.toolchain-header:hover {
+  background: var(--bg-hover);
 }
 
 .tool-status-icon {
-  margin-right: 8px;
-  font-size: 1rem;
+  font-size: 0.9rem;
 }
 
 .tool-summary {
   font-size: 0.78rem;
   color: var(--text-secondary);
-  flex: 1;
 }
 
 .tool-summary strong {
-  color: var(--text-primary);
+  color: var(--accent);
 }
 
 .accordion-arrow {
-  font-size: 0.65rem;
+  margin-left: auto;
+  font-size: 0.7rem;
   color: var(--text-muted);
 }
 
 .toolchain-detail {
+  padding: 0 14px 12px;
   border-top: 1px solid var(--border-color);
-  background: rgba(0,0,0,0.15);
-  padding: 12px;
 }
 
 .code-pre {
-  font-family: monospace;
+  background: var(--bg-primary);
+  padding: 10px;
+  border-radius: 6px;
   font-size: 0.75rem;
+  overflow-x: auto;
   color: var(--text-secondary);
-  white-space: pre-wrap;
-  margin: 0;
+  margin: 8px 0 0;
 }
 
-/* 权限确认卡片 */
-.permission-card {
-  align-self: flex-start;
-  width: 100%;
-  max-width: 500px;
-  background: rgba(255, 193, 7, 0.06);
-  border: 1px solid rgba(255, 193, 7, 0.3);
-  border-radius: var(--radius-md);
-  padding: 14px;
-  margin: 6px 0;
-}
-
-.perm-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.82rem;
-  color: var(--text-primary);
-  margin-bottom: 8px;
-}
-
-.perm-icon {
-  font-size: 1.1rem;
-}
-
+/* Permission */
 .perm-reason {
-  font-size: 0.75rem;
+  font-size: 0.8rem;
   color: var(--text-secondary);
-  margin-bottom: 8px;
-}
-
-.perm-args {
-  margin-bottom: 10px;
-  font-size: 0.72rem;
-  opacity: 0.8;
+  margin: 8px 0;
 }
 
 .perm-actions {
@@ -670,147 +553,149 @@ watch(() => props.conversationId, () => {
 
 .perm-btn {
   padding: 6px 16px;
-  border-radius: var(--radius-sm);
+  border-radius: 6px;
   font-size: 0.78rem;
   font-weight: 600;
   cursor: pointer;
-  border: none;
   transition: var(--transition-fast);
 }
 
-.perm-btn.approve {
+.perm-btn.deny {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.perm-btn.allow {
   background: var(--accent);
+  border: 1px solid var(--accent);
   color: white;
 }
 
-.perm-btn.approve:hover {
-  background: var(--accent-light);
-}
-
-.perm-btn.deny {
-  background: transparent;
-  color: var(--text-secondary);
-  border: 1px solid var(--border-color);
-}
-
-.perm-btn.deny:hover {
-  border-color: #e53e3e;
-  color: #e53e3e;
-}
-
 .perm-status {
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   color: var(--text-muted);
+  margin: 8px 0 0;
 }
 
+/* Input Section */
 .input-section {
-  padding: 16px 40px 24px 40px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  flex-shrink: 0;
+  padding: 10px 32px 16px;
+  border-top: 1px solid var(--border-color);
 }
 
 .quick-actions {
   display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
 }
 
 .quick-btn {
-  background: var(--bg-input);
+  background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   color: var(--text-secondary);
   padding: 6px 12px;
-  border-radius: var(--radius-md);
+  border-radius: 8px;
   font-size: 0.72rem;
-  font-weight: 500;
   cursor: pointer;
+  white-space: nowrap;
   transition: var(--transition-fast);
 }
 
 .quick-btn:hover {
-  border-color: var(--accent);
+  background: var(--bg-hover);
   color: var(--text-primary);
 }
 
 .mode-switch-bar {
   display: flex;
-  gap: 6px;
+  gap: 0;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--border-color);
 }
 
 .mode-btn {
-  background: var(--bg-input);
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
-  padding: 5px 14px;
-  border-radius: 20px;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--text-muted);
+  padding: 6px 14px 8px;
   font-size: 0.75rem;
   font-weight: 500;
   cursor: pointer;
-  transition: var(--transition-fast);
+  transition: all var(--transition-fast);
 }
 
 .mode-btn:hover {
-  border-color: var(--accent);
-  color: var(--text-primary);
+  color: var(--text-secondary);
 }
 
 .mode-btn.active {
-  background: var(--accent-dim);
-  border-color: var(--accent);
-  color: var(--accent);
-  font-weight: 600;
+  color: var(--text-primary);
+  border-bottom-color: var(--accent);
+}
+
+.input-wrapper {
+  flex: 1;
+  position: relative;
 }
 
 .input-container {
   display: flex;
-  background: var(--bg-input);
-  border: 1px solid var(--border-input);
-  border-radius: var(--radius-lg);
-  padding: 8px 12px;
-  align-items: center;
-  box-shadow: var(--shadow-sm);
-  transition: var(--transition-fast);
-}
-
-.input-container:focus-within {
-  border-color: var(--accent);
-  box-shadow: 0 0 10px rgba(16, 163, 127, 0.15);
+  gap: 8px;
+  align-items: flex-end;
+  max-width: 768px;
+  margin: 0 auto;
 }
 
 .smart-textarea {
   flex: 1;
-  background: transparent;
-  border: none;
-  resize: none;
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: 16px;
   color: var(--text-primary);
-  font-size: 0.85rem;
-  padding: 8px 4px;
+  padding: 10px 16px;
+  font-size: 0.875rem;
+  outline: none;
+  resize: none;
+  font-family: inherit;
+  line-height: 1.5;
+  min-height: 42px;
+  max-height: 120px;
+  transition: border-color var(--transition-fast);
 }
 
 .smart-textarea:focus {
-  outline: none;
+  border-color: var(--border-focus);
+}
+
+.smart-textarea::placeholder {
+  color: var(--text-muted);
 }
 
 .send-btn {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
   background: var(--accent);
-  color: white;
   border: none;
-  padding: 8px 16px;
-  border-radius: var(--radius-md);
-  font-size: 0.78rem;
-  font-weight: 600;
+  color: #fff;
   cursor: pointer;
-  transition: var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: opacity var(--transition-fast);
 }
 
 .send-btn:hover {
-  background: var(--accent-light);
+  opacity: 0.85;
 }
 
 .send-btn:disabled {
-  background: var(--text-muted);
+  opacity: 0.25;
   cursor: not-allowed;
 }
 </style>

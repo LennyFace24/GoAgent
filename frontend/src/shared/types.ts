@@ -8,7 +8,8 @@ export interface BaseMessage {
   content?: string
   streaming?: boolean
   order?: number
-  isThinking?: boolean
+  isThinking?: boolean   // AI 正在思考（显示 loading 点）
+  isGenerating?: boolean // AI 正在生成（显示光标）
 }
 
 // 用户/助手消息
