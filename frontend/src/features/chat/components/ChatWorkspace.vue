@@ -651,7 +651,7 @@ onActivated(() => {
 }
 
 .smart-textarea {
-  flex: 1;
+  width: 100%;
   background: var(--bg-input);
   border: 1px solid var(--border-input);
   border-radius: 16px;
