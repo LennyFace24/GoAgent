@@ -53,13 +53,12 @@ function getCategoryLabel(category: string): string {
   position: absolute;
   bottom: 100%;
   left: 0;
-  right: 0;
-  max-width: 768px;
-  margin: 0 auto 8px;
+  width: 100%;
+  margin-bottom: 8px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: 12px;
-  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.15);
+  box-shadow: var(--shadow-lg);
   overflow: hidden;
   z-index: 100;
 }

@@ -7,6 +7,7 @@
   --bg-body: #101014;
   --bg-sidebar-mini: #14141d;
   --bg-sidebar-sub: #181822;
+  --bg-secondary: #181822;
   --bg-chat-bubble: #1e1e2d;
   --bg-chat-bubble-user: #10a37f;
   --bg-input: #1b1b26;
@@ -62,6 +63,7 @@
     --bg-body: #f4f5f8;
     --bg-sidebar-mini: #eef1f6;
     --bg-sidebar-sub: #ffffff;
+    --bg-secondary: #ffffff;
     --bg-chat-bubble: #ffffff;
     --bg-chat-bubble-user: #10a37f;
     --bg-input: #f0f0f4;
