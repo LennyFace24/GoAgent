@@ -49,7 +49,7 @@ async function createNewConv() {
     if (res.ok) {
       const data = await res.json()
       await fetchConvs()
-      emit('created', data.id)
+      emit('created', data.conversation.id)
     }
   } catch {
     const newId = 'conv_' + Date.now()
