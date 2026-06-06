@@ -25,13 +25,14 @@ import (
 
 // ToolEvent 通过 SSE 推送给前端的工具事件
 type ToolEvent struct {
-	Type      string `json:"type"`       // "tool_call" | "tool_result" | "permission_request"
+	Type      string `json:"type"`       // "tool_call" | "tool_result" | "permission_request" | "thinking"
 	Name      string `json:"name"`       // 工具名称
 	Args      string `json:"args,omitempty"`
 	Result    string `json:"result,omitempty"`
 	CallID    string `json:"call_id,omitempty"`
 	RequestID string `json:"request_id,omitempty"`
 	Reason    string `json:"reason,omitempty"`
+	Content   string `json:"content,omitempty"` // 思考内容
 }
 
 // AgentService 统一的 Agent 服务，根据 mode 选择不同的 prompt 和行为
@@ -173,6 +174,15 @@ func (s *AgentService) runLoop(
 		if len(fullMsg.ToolCalls) == 0 {
 			log.Printf("[Turn %d] 无 ToolCall，返回最终回答", turn)
 			return
+		}
+
+		// 发送思考内容：LLM 在决定调用工具前的推理
+		thinkingContent := fullMsg.Content
+		if thinkingContent != "" {
+			toolEvents <- ToolEvent{
+				Type:    "thinking",
+				Content: thinkingContent,
+			}
 		}
 
 		// todo 提醒（仅 chat 模式）

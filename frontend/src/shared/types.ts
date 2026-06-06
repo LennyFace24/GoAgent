@@ -1,5 +1,5 @@
 // 消息角色类型
-export type MessageRole = 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'permission_req'
+export type MessageRole = 'user' | 'assistant' | 'tool_call' | 'tool_result' | 'permission_req' | 'thinking'
 
 // 基础消息接口
 export interface BaseMessage {
@@ -47,8 +47,14 @@ export interface PermissionMessage extends BaseMessage {
   approved?: boolean
 }
 
+// 思考消息
+export interface ThinkingMessage extends BaseMessage {
+  role: 'thinking'
+  content: string
+}
+
 // 联合消息类型
-export type Message = ChatMessage | ToolCallMessage | ToolResultMessage | PermissionMessage
+export type Message = ChatMessage | ToolCallMessage | ToolResultMessage | PermissionMessage | ThinkingMessage
 
 // SSE 工具事件
 export interface ToolEventData {

@@ -7,6 +7,7 @@ import MessageBubble from './MessageBubble.vue'
 import ToolCallBlock from './ToolCallBlock.vue'
 import ToolResultBlock from './ToolResultBlock.vue'
 import PermissionCard from './PermissionCard.vue'
+import ThinkingBlock from './ThinkingBlock.vue'
 import InputBar from './InputBar.vue'
 
 const props = defineProps<{
@@ -55,8 +56,12 @@ watch(() => props.conversationId, () => {
       </div>
 
       <template v-for="msg in messages" :key="msg.id">
+        <ThinkingBlock
+          v-if="msg.role === 'thinking'"
+          :content="msg.content || ''"
+        />
         <ToolCallBlock
-          v-if="msg.role === 'tool_call'"
+          v-else-if="msg.role === 'tool_call'"
           :name="msg.name"
           :args="msg.args"
         />

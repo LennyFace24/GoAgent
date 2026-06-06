@@ -1,5 +1,5 @@
 import { ref, nextTick, type Ref } from 'vue'
-import type { Message, ToolEventData } from '../../../shared/types'
+import type { Message, ToolEventData, ThinkingMessage } from '../../../shared/types'
 
 export function useSSE(messages: Ref<Message[]>) {
   const sending = ref<boolean>(false)
@@ -99,6 +99,27 @@ export function useSSE(messages: Ref<Message[]>) {
               scrollBottom(scrollEl)
             } else if (data.error) {
               appendLast(`\n\n[错误: ${data.error}]`)
+            }
+          } catch { /* ignore */ }
+        }
+
+        // 解析 event:thinking 事件
+        for (let i = 0; i < lines.length; i++) {
+          if (!lines[i].startsWith('event:thinking')) continue
+          const dataLine = lines[i + 1]
+          if (!dataLine || !dataLine.startsWith('data:')) continue
+          try {
+            const data = JSON.parse(dataLine.slice(5).trim())
+            if (data.content) {
+              // 在 assistantMsg 之前插入 thinking 消息
+              const insertIdx = messages.value.indexOf(assistantMsg)
+              const thinkingMsg: ThinkingMessage = {
+                id: Date.now() + Math.random(),
+                role: 'thinking',
+                content: data.content,
+              }
+              messages.value.splice(insertIdx, 0, thinkingMsg)
+              scrollBottom(scrollEl)
             }
           } catch { /* ignore */ }
         }

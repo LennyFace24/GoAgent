@@ -66,6 +66,12 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 
 	go func() {
 		for ev := range toolEvents {
+			// thinking 事件单独发送，不包装在 tool 事件中
+			if ev.Type == "thinking" {
+				c.SSEvent("thinking", gin.H{"content": ev.Content})
+				c.Writer.Flush()
+				continue
+			}
 			c.SSEvent("tool", ev)
 			c.Writer.Flush()
 			switch ev.Type {
