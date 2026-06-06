@@ -647,8 +647,6 @@ onActivated(() => {
   display: flex;
   gap: 8px;
   align-items: flex-end;
-  max-width: 768px;
-  margin: 0 auto;
 }
 
 .smart-textarea {
