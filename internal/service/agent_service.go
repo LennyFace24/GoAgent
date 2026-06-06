@@ -178,6 +178,7 @@ func (s *AgentService) runLoop(
 
 		// 发送思考内容：LLM 在决定调用工具前的推理
 		thinkingContent := fullMsg.Content
+		log.Printf("[Turn %d] 思考内容长度: %d, 内容: %s", turn, len(thinkingContent), thinkingContent)
 		if thinkingContent != "" {
 			toolEvents <- ToolEvent{
 				Type:    "thinking",

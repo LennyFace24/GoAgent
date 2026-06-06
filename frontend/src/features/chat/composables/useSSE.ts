@@ -110,6 +110,7 @@ export function useSSE(messages: Ref<Message[]>) {
           if (!dataLine || !dataLine.startsWith('data:')) continue
           try {
             const data = JSON.parse(dataLine.slice(5).trim())
+            console.log('[SSE] 收到 thinking 事件:', data)
             if (data.content) {
               // 在 assistantMsg 之前插入 thinking 消息
               const insertIdx = messages.value.indexOf(assistantMsg)
@@ -121,7 +122,7 @@ export function useSSE(messages: Ref<Message[]>) {
               messages.value.splice(insertIdx, 0, thinkingMsg)
               scrollBottom(scrollEl)
             }
-          } catch { /* ignore */ }
+          } catch (e) { console.error('[SSE] 解析 thinking 事件失败:', e) }
         }
 
         // 解析 event:tool 事件

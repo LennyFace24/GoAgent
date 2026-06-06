@@ -30,9 +30,16 @@ const chatMode = ref<'chat' | 'aiops'>('aiops')
 
 // ---------- Composables ----------
 
+const conversationIdRef = ref(props.conversationId)
+
+// 监听 prop 变化，同步更新 ref
+watch(() => props.conversationId, (newId) => {
+  conversationIdRef.value = newId
+})
+
 const { isSending, send, abort, loadHistory } = useChat({
   messages,
-  conversationId: ref(props.conversationId),
+  conversationId: conversationIdRef,
   chatMode,
   scrollToBottom,
 })
