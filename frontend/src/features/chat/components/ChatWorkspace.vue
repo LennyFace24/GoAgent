@@ -325,6 +325,7 @@ onActivated(() => {
           <CommandPalette
             :commands="filteredCommands"
             :selectedIndex="commandSelectedIndex"
+            :visible="paletteVisible"
             @select="onCommandSelect"
           />
           <textarea

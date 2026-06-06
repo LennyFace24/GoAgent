@@ -6,6 +6,7 @@ import type { Command } from '../composables/useCommands'
 defineProps<{
   commands: Command[]
   selectedIndex: number
+  visible: boolean
 }>()
 
 const emit = defineEmits<{
@@ -24,7 +25,7 @@ function getCategoryLabel(category: string): string {
 </script>
 
 <template>
-  <div class="command-palette" v-if="commands.length > 0">
+  <div class="command-palette" v-if="visible && commands.length > 0">
     <div class="palette-header">
       <span class="palette-title">斜杠命令</span>
       <span class="palette-hint">↑↓ 选择 · Enter 确认</span>
