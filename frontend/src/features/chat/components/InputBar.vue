@@ -118,6 +118,7 @@ function doSend(): void {
       <CommandPalette
         :commands="filteredCommands"
         :selectedIndex="selectedIndex"
+        :visible="paletteVisible"
         @select="onCommandSelect"
       />
       <div class="input-row">
