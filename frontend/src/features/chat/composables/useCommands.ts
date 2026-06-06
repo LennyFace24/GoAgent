@@ -50,9 +50,18 @@ export function useCommands() {
         return
       }
       filterText.value = query
-      visible.value = filteredCommands.value.length > 0
+      // 直接计算过滤结果，避免依赖 computed 的延迟更新
+      const filter = query.toLowerCase()
+      const filtered = filter
+        ? commands.value.filter(
+            (cmd) =>
+              cmd.name.toLowerCase().includes(filter) ||
+              cmd.description.toLowerCase().includes(filter)
+          )
+        : commands.value
+      visible.value = filtered.length > 0
       // 重置选中索引
-      if (selectedIndex.value >= filteredCommands.value.length) {
+      if (selectedIndex.value >= filtered.length) {
         selectedIndex.value = 0
       }
     } else {
