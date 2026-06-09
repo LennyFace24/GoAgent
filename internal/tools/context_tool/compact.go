@@ -17,13 +17,11 @@ import (
 )
 
 const (
-	CoarseThreshold         = 1_500_000
-	MicroCompactThreshold   = 400_000
-	CompactThreshold        = 800_000
-	KeepRecentTurns         = 6
-	KeepRecentMicroCompact  = 10
-	TranscriptDir           = "data/transcripts"
+	KeepRecentTurns        = 6
+	KeepRecentMicroCompact = 10
+	TranscriptDir          = "data/transcripts"
 )
+
 
 // ---------- compact 工具定义 ----------
 

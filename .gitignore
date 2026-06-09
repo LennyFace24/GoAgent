@@ -26,9 +26,6 @@ images/
 *.jpg
 *.jpeg
 
-# Test documents
-test_docs/
-
 # Python venv (milvus-service)
 .venv/
 __pycache__/

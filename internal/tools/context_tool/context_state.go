@@ -9,10 +9,10 @@ import (
 
 // ContextState 上下文状态管理器
 type ContextState struct {
-	mu             sync.RWMutex
-	maxTokens      int64 // 最大 token 限制
-	currentTokens  int64 // 当前 token 使用量
-	messageCount   int64 // 消息数量
+	mu            sync.RWMutex
+	maxTokens     int64 // 最大 token 限制
+	currentTokens int64 // 当前 token 使用量
+	messageCount  int64 // 消息数量
 }
 
 // 默认配置
@@ -32,6 +32,23 @@ func NewContextState(maxTokens int64) *ContextState {
 	return &ContextState{
 		maxTokens: maxTokens,
 	}
+}
+
+func (cs *ContextState) ConfigureMaxTokens(maxTokens int64) {
+	if maxTokens <= 0 {
+		return
+	}
+	cs.mu.Lock()
+	defer cs.mu.Unlock()
+	cs.maxTokens = maxTokens
+}
+
+// MaxTokens 返回当前最大 token 限制（只读）
+func (cs *ContextState) MaxTokens() int64 {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	return cs.maxTokens
+
 }
 
 // GetContextState 获取全局上下文状态

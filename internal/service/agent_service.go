@@ -2,19 +2,21 @@ package service
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
 	cfg "github.com/LennyFace24/MiniAgent/internal/config"
+	ctxmgr "github.com/LennyFace24/MiniAgent/internal/context"
 	"github.com/LennyFace24/MiniAgent/internal/permission"
-	"github.com/LennyFace24/MiniAgent/internal/prompt"
+	"github.com/LennyFace24/MiniAgent/internal/skills"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
 	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 
-	
 	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
@@ -22,6 +24,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 )
+
 
 // ToolEvent 通过 SSE 推送给前端的工具事件
 type ToolEvent struct {
@@ -43,7 +46,11 @@ type AgentService struct {
 	tools          []tool.BaseTool
 	compactTrigger *contexttool.CompactTrigger
 	perms          *permission.PermissionManager
+	budget         int64 // 上下文 token 预算（ContextBudgetTokens）
+	skillReg       *skills.SkillRegistry
 }
+
+
 
 func NewAgentService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore) *AgentService {
 	compactTrigger := toolHandler.CompactTrigger
@@ -83,7 +90,10 @@ func NewAgentService(toolHandler *tools.ToolHandler, convStore *store.Conversati
 		tools:          tools_,
 		compactTrigger: compactTrigger,
 		perms:          permission.NewPermissionManager(permission.ModeDefault),
+		budget:         cfg.GetConfig().ContextBudgetTokens(),
+		skillReg:       skills.NewSkillRegistry(),
 	}
+
 }
 
 // Stream 启动流式 Agent 对话，mode 支持 "chat" 和 "aiops"
@@ -96,24 +106,41 @@ func (s *AgentService) Stream(ctx context.Context,
 		history = nil
 	}
 
-	// 根据 mode 选择 prompt block
-	b := prompt.NewBuilder()
-	switch mode {
-	case "aiops":
-		b.Add(prompt.AIOpsCoreBlock())
-	default:
-		b.Add(prompt.CoreBlock())
-	}
-	b.Add(prompt.ToolsRuleBlock())
+	// 构建上下文
+	cm := ctxmgr.New(s.budget, s.skillReg)
+	cm.SetMode(mode)
+	cm.LoadSoul()
+	cm.LoadSkills()
+	cm.LoadMemory()
+	history = cm.BuildHistory(ctx, history, s.baseModel, sessionID, conversationID)
+	messages := cm.BuildMessages(history, userMsg)
 
-	messages := []*schema.Message{schema.SystemMessage(b.Build())}
-	messages = append(messages, history...)
-	messages = append(messages, schema.UserMessage(userMsg))
+	// 每次请求创建独立的 ContextState，避免跨对话污染
+	ctxState := contexttool.NewContextState(s.budget)
+
+	// 同步全局单例（供 /context HTTP 端点展示）
+	globalState := contexttool.GetContextState()
+	globalState.ConfigureMaxTokens(s.budget)
 
 	iterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
 	toolEvents := make(chan ToolEvent, 64)
-	go s.runLoop(ctx, mode, messages, generator, toolEvents, sessionID, conversationID)
+	go s.runLoop(ctx, mode, messages, generator, toolEvents, sessionID, conversationID, ctxState)
 	return iterator, toolEvents, nil
+}
+
+
+
+
+// callRecord 记录一次工具调用，用于重复检测
+type callRecord struct {
+	name     string
+	argsHash string
+}
+
+// allowRepeatTools 允许重复调用的工具白名单（幂等查询类）
+var allowRepeatTools = map[string]bool{
+	"context_status": true,
+	"list_tasks":     true,
 }
 
 func (s *AgentService) runLoop(
@@ -124,23 +151,25 @@ func (s *AgentService) runLoop(
 	toolEvents chan ToolEvent,
 	sessionID string,
 	conversationID string,
+	ctxState *contexttool.ContextState,
 ) {
+
 	defer close(toolEvents)
 	defer gen.Close()
 
 	const maxTurns = 20
 	turn := 0
 	todoUncalledCount := 0
+	recentCalls := make([]callRecord, 0, 20) // 重复调用检测滑动窗口
+
 
 	for {
-		turn++
-
-		// 更新上下文状态
-		contextState := contexttool.GetContextState()
-		contextState.EstimateAndEstimateMessages(messages)
+		// 更新上下文状态（使用本次请求的独立实例）
+		ctxState.EstimateAndEstimateMessages(messages)
 
 		// compact 检查
-		level := contexttool.ShouldCompact(messages)
+		level := contexttool.ShouldCompact(messages, ctxState)
+
 		if s.compactTrigger.IsTriggered() {
 			level = contexttool.CompactFull
 		}
@@ -216,6 +245,25 @@ func (s *AgentService) runLoop(
 				CallID: tc.ID,
 			}
 
+			// 重复调用检测
+			argsHash := hex.EncodeToString(sha256.New().Sum([]byte(tc.Function.Arguments)))
+			isRepeat := false
+			if !allowRepeatTools[tc.Function.Name] {
+				repeatCount := 0
+				for _, r := range recentCalls {
+					if r.name == tc.Function.Name && r.argsHash == argsHash {
+						repeatCount++
+					}
+				}
+				if repeatCount >= 2 {
+					isRepeat = true
+				}
+			}
+			recentCalls = append(recentCalls, callRecord{name: tc.Function.Name, argsHash: argsHash})
+			if len(recentCalls) > 20 {
+				recentCalls = recentCalls[1:]
+			}
+
 			var toolInput map[string]any
 			json.Unmarshal([]byte(tc.Function.Arguments), &toolInput)
 			if toolInput == nil {
@@ -224,6 +272,12 @@ func (s *AgentService) runLoop(
 
 			decision := s.perms.Check(tc.Function.Name, toolInput)
 			var result string
+
+			if isRepeat {
+				result = "[系统] 此工具调用与之前完全相同，已跳过执行。请基于已有信息直接回答，不要重复调用。"
+				log.Printf("[Turn %d] 检测到重复调用: %s, args=%s", turn, tc.Function.Name, tc.Function.Arguments)
+			} else {
+
 
 			switch decision.Behavior {
 			case permission.BehaviorDeny:
@@ -276,6 +330,8 @@ func (s *AgentService) runLoop(
 				result = result + "\n\n[系统提醒] 你已经连续多轮未更新待办事项，请立即调用 read_todo 和 write_todo 更新当前任务进度。"
 				needReminder = false
 			}
+			} // end else (!isRepeat)
+
 
 			toolEvents <- ToolEvent{
 				Type:   "tool_result",

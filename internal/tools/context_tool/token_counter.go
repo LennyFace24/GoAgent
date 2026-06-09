@@ -26,50 +26,29 @@ const (
 	CompactFull                      // Lever 2: old 消息总结为摘要
 )
 
-// ShouldCompact 判断是否需要压缩，返回压缩级别
-func ShouldCompact(messages []*schema.Message) CompactLevel {
-	// 使用全局状态管理器
-	state := GetContextState()
+// ShouldCompact 根据传入的 ContextState 判断是否需要压缩。
+// 阈值基于预算百分比，不再依赖绝对 token 数。
+func ShouldCompact(messages []*schema.Message, state *ContextState) CompactLevel {
 	usage := state.GetUsage()
 
-	// 如果状态管理器有数据，使用百分比判断
-	if usage.CurrentTokens > 0 {
-		// 超过 90% 触发完整压缩
-		if usage.Percentage > 90 {
-			return CompactFull
-		}
-		// 超过 70% 触发微压缩
-		if usage.Percentage > 70 {
-			return CompactMicro
-		}
-		return CompactNone
+	// 首次调用时 currentTokens 可能为 0，先估算一次
+	if usage.CurrentTokens == 0 {
+		tokens := EstimateTokens(messages)
+		state.SetTokens(int64(tokens))
+		usage = state.GetUsage()
 	}
 
-	// 回退：手动计算
-	totalChars := 0
-	for _, m := range messages {
-		totalChars += len(m.Content)
-		for _, tc := range m.ToolCalls {
-			totalChars += len(tc.Function.Arguments)
-		}
-	}
-
-	// 字符数粗判
-	if totalChars < CoarseThreshold {
-		return CompactNone
-	}
-
-	tokens := EstimateTokens(messages)
-	state.SetTokens(int64(tokens))
-
-	if tokens > CompactThreshold {
+	// 超过 85% 触发完整压缩（LLM 摘要）
+	if usage.Percentage > 85 {
 		return CompactFull
 	}
-	if tokens > MicroCompactThreshold {
+	// 超过 60% 触发微压缩（旧工具结果替换为 [expired]）
+	if usage.Percentage > 60 {
 		return CompactMicro
 	}
 	return CompactNone
 }
+
 
 // EstimateTokens 使用 tiktoken 估算消息的 token 数
 func EstimateTokens(messages []*schema.Message) int {
