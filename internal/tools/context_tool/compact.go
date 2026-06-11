@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -16,11 +17,13 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+
 const (
 	KeepRecentTurns        = 6
-	KeepRecentMicroCompact = 10
+	KeepRecentMicroCompact = 6
 	TranscriptDir          = "data/transcripts"
 )
+
 
 
 // ---------- compact 工具定义 ----------
@@ -56,9 +59,8 @@ func NewCompactTool() (tool.InvokableTool, *CompactTrigger, error) {
 }
 
 // ---------- 压缩核心逻辑 ----------
-
-// MicroCompactFunc Lever 1: 旧工具结果替换为 [expired]
-// 保留最近 KeepRecentMicroCompact 轮的工具结果，更早的替换为占位符
+// MicroCompactFunc Lever 1: 旧工具结果压缩为摘要
+// 保留最近 KeepRecentMicroCompact 轮的工具结果，更早的替换为 "[compressed] toolName: 概要"
 func MicroCompactFunc(messages []*schema.Message) []*schema.Message {
 	if len(messages) <= 1 {
 		return messages
@@ -80,7 +82,12 @@ func MicroCompactFunc(messages []*schema.Message) []*schema.Message {
 	compressed := 0
 	for i := 1; i < cutIdx; i++ {
 		if messages[i].Role == schema.Tool && messages[i].Content != "" {
-			messages[i].Content = "[expired]"
+			toolName := messages[i].ToolName
+			if toolName == "" {
+				toolName = "unknown"
+			}
+			hint := extractHint(messages[i].Content, 80)
+			messages[i].Content = fmt.Sprintf("[compressed] %s: %s", toolName, hint)
 			compressed++
 		}
 	}
@@ -89,6 +96,22 @@ func MicroCompactFunc(messages []*schema.Message) []*schema.Message {
 		log.Printf("MicroCompactFunc: 压缩了 %d 条工具结果", compressed)
 	}
 	return messages
+}
+
+// extractHint 从工具结果中提取简短摘要
+func extractHint(content string, maxLen int) string {
+	// 取第一行作为摘要
+	if idx := strings.Index(content, "\n"); idx > 0 {
+		content = content[:idx]
+	}
+	content = strings.TrimSpace(content)
+	if len(content) > maxLen {
+		return content[:maxLen] + "..."
+	}
+	if content == "" {
+		return "(empty result)"
+	}
+	return content
 }
 
 // CompactFunc Lever 2: old 消息总结为摘要，service 层调用

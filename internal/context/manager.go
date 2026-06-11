@@ -6,15 +6,17 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"runtime"
 	"sort"
 	"strings"
 
-	"github.com/LennyFace24/MiniAgent/internal/prompt"
 	"github.com/LennyFace24/MiniAgent/internal/skills"
 	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
+
+
 
 // Slot 代表上下文的一个模块
 type Slot struct {
@@ -25,56 +27,91 @@ type Slot struct {
 
 // ContextManager 负责组装完整的上下文
 type ContextManager struct {
-	slots       []Slot
-	soulPath    string
-	memoryPath  string
-	skillReg    *skills.SkillRegistry
-	budget      int64
+	slots            []Slot
+	soulPath         string
+	agentPath        string // AGENT.md 路径
+	memoryPath       string
+	systemPromptPath string // system_prompt.md 路径
+	aiOpsPromptPath  string // ai_ops.md 路径
+	skillReg         *skills.SkillRegistry
+	budget           int64
 }
 
 // New 创建 ContextManager
 func New(budget int64, skillReg *skills.SkillRegistry) *ContextManager {
 	return &ContextManager{
-		soulPath:   filepath.Join("data", "soul.md"),
-		memoryPath: filepath.Join("data", "memory.md"),
-		skillReg:   skillReg,
-		budget:     budget,
+		soulPath:         filepath.Join("data", "soul.md"),
+		agentPath:        "AGENT.md",
+		memoryPath:       filepath.Join("data", "memory.md"),
+		systemPromptPath: filepath.Join("internal", "prompt", "system_prompt.md"),
+		aiOpsPromptPath:  filepath.Join("internal", "prompt", "ai_ops.md"),
+		skillReg:         skillReg,
+		budget:           budget,
 	}
 }
 
+
+
 // --- Slot 注入方法 ---
 
-// SetMode 根据 mode 设置 global_rules 内容
+// SetMode 加载 global_rules：system_prompt.md 始终加载，aiops 模式额外追加 ai_ops.md
 func (cm *ContextManager) SetMode(mode string) {
-	var content string
-	switch mode {
-	case "aiops":
-		content = prompt.AIOpsCoreBlock().Content
-	default:
-		content = prompt.CoreBlock().Content
+	// 始终加载 system_prompt.md
+	data, err := os.ReadFile(cm.systemPromptPath)
+	if err != nil {
+		log.Printf("ContextManager: 读取 system_prompt.md 失败: %v", err)
+		return
 	}
-	// 追加工具规范
-	content += "\n\n" + prompt.ToolsRuleBlock().Content
+	content := strings.TrimSpace(string(data))
+
+	// aiops 模式追加诊断指令
+	if mode == "aiops" {
+		aiOpsData, err := os.ReadFile(cm.aiOpsPromptPath)
+		if err != nil {
+			log.Printf("ContextManager: 读取 ai_ops.md 失败: %v", err)
+		} else {
+			content += "\n\n" + strings.TrimSpace(string(aiOpsData))
+		}
+	}
+
 	cm.setSlot("global_rules", content, 0)
+}
+
+
+
+
+// LoadSystemInfo 注入当前系统环境信息
+func (cm *ContextManager) LoadSystemInfo() {
+	info := fmt.Sprintf("OS: %s\nArch: %s", runtime.GOOS, runtime.GOARCH)
+	switch runtime.GOOS {
+	case "windows":
+		info += "\nShell: cmd/PowerShell\n注意: Windows 系统，使用 dir/cls/type 等 Windows 命令，不要使用 ls/clear/cat 等 Linux 命令。"
+	case "linux":
+		info += "\nShell: bash\n注意: Linux 系统，使用 ls/cat/grep 等标准命令。"
+	case "darwin":
+		info += "\nShell: zsh/bash\n注意: macOS 系统，使用 ls/cat/grep 等标准命令。"
+	}
+	cm.setSlot("system_info", info, 0)
 }
 
 // LoadSoul 从文件加载 SOUL.md，文件不存在则跳过
 func (cm *ContextManager) LoadSoul() {
 	data, err := os.ReadFile(cm.soulPath)
 	if err != nil {
-		return // 文件不存在，跳过
+		return
 	}
 	cm.setSlot("soul", strings.TrimSpace(string(data)), 1)
 }
 
-// LoadProjectContext 从文件加载 CLAUDE.md，文件不存在则跳过
-func (cm *ContextManager) LoadProjectContext(path string) {
-	data, err := os.ReadFile(path)
+// LoadProjectContext 从文件加载 AGENT.md，文件不存在则跳过
+func (cm *ContextManager) LoadProjectContext() {
+	data, err := os.ReadFile(cm.agentPath)
 	if err != nil {
 		return
 	}
 	cm.setSlot("project_context", strings.TrimSpace(string(data)), 3)
 }
+
 
 // LoadMemory 从文件加载 memory.md，文件不存在则跳过
 func (cm *ContextManager) LoadMemory() {

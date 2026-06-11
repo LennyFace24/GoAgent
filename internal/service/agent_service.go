@@ -109,9 +109,13 @@ func (s *AgentService) Stream(ctx context.Context,
 	// 构建上下文
 	cm := ctxmgr.New(s.budget, s.skillReg)
 	cm.SetMode(mode)
+	cm.LoadSystemInfo()
 	cm.LoadSoul()
+	cm.LoadProjectContext()
 	cm.LoadSkills()
 	cm.LoadMemory()
+
+
 	history = cm.BuildHistory(ctx, history, s.baseModel, sessionID, conversationID)
 	messages := cm.BuildMessages(history, userMsg)
 
