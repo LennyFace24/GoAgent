@@ -81,3 +81,12 @@ export interface ApiMessage {
   tool_call_id?: string
   tool_name?: string
 }
+
+// AI 回复分组（一轮完整回复）
+export interface MessageGroup {
+  thinking: ThinkingMessage | null
+  toolCalls: ToolCallMessage[]
+  toolResults: ToolResultMessage[]
+  reply: ChatMessage | null
+}
+

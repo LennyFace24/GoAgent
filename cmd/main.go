@@ -21,6 +21,8 @@ func main() {
 	contexttool.GetContextState().ConfigureMaxTokens(cfg.ContextBudgetTokens())
 
 	r := gin.Default()
+	r.Use(middleware.CORS())
+
 
 	store := cookie.NewStore([]byte("session-secret"))
 	r.Use(sessions.Sessions("goagent_session", store))
@@ -31,3 +33,4 @@ func main() {
 
 	r.Run(cfg.Server.Host + ":" + cfg.Server.Port)
 }
+

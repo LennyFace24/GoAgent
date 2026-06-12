@@ -45,13 +45,18 @@ export function useChat(options: UseChatOptions) {
     activeAbort = abortCtrl
 
     try {
+      const base = import.meta.env.VITE_API_URL || window.location.origin
       const endpoint = chatMode.value === 'aiops' ? '/api/ai_ops' : '/api/chat_stream'
-      const res = await fetch(endpoint, {
+      const url = base + endpoint
+      console.log('[useChat] 请求 URL:', url)
+      const res = await fetch(url, {
+
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, conversation_id: conversationId.value }),
         signal: abortCtrl.signal,
       })
+
 
       if (!res.ok) {
         updateAiMessage(aiMessageId, {
@@ -94,25 +99,36 @@ export function useChat(options: UseChatOptions) {
 
       const { done, value } = await reader.read()
       if (done) break
-      buffer += decoder.decode(value, { stream: true })
+      const chunk = decoder.decode(value, { stream: true })
+      console.log('[useChat] 收到数据:', JSON.stringify(chunk))
+      buffer += chunk
 
-      const lines = buffer.split('\n')
-      buffer = lines.pop() || ''
+      // 按双换行分割完整事件
+      const events = buffer.split('\n\n')
+      buffer = events.pop() || ''
 
-      let currentEvent = ''
-      for (const line of lines) {
-        if (line.startsWith('event:')) {
-          currentEvent = line.slice(6).trim()
-          continue
+      for (const event of events) {
+        if (!event.trim()) continue
+        console.log('[useChat] 处理事件:', JSON.stringify(event))
+
+        let eventType = ''
+        let eventData = ''
+
+        for (const line of event.split('\n')) {
+          if (line.startsWith('event:')) {
+            eventType = line.slice(6).trim()
+          } else if (line.startsWith('data:')) {
+            eventData = line.slice(5).trim()
+          }
         }
-        if (!line.startsWith('data:')) continue
-        const payload = line.slice(5).trim()
-        if (!payload) continue
 
-        handleSSEEvent(currentEvent, payload, aiMessageId)
+        if (!eventData) continue
+        console.log('[useChat] 解析:', eventType, eventData.slice(0, 100))
+        handleSSEEvent(eventType, eventData, aiMessageId)
       }
     }
   }
+
 
   // 处理 SSE 事件
   function handleSSEEvent(event: string, payload: string, aiMessageId: number) {

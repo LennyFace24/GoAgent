@@ -13,6 +13,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+
+
 type AgentHandler struct {
 	service *service.AgentService
 }
@@ -60,22 +62,24 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
 	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("Transfer-Encoding", "chunked")
+
 
 	var fullReply strings.Builder
 	var toolMsgs []*schema.Message
 
 	go func() {
 		for ev := range toolEvents {
-			// thinking 事件单独发送，不包装在 tool 事件中
-			if ev.Type == "thinking" {
-				c.SSEvent("thinking", gin.H{"content": ev.Content})
-				c.Writer.Flush()
-				continue
-			}
-			c.SSEvent("tool", ev)
-			c.Writer.Flush()
 			switch ev.Type {
+			case "thinking_delta":
+				c.SSEvent("thinking_delta", gin.H{"content": ev.Content})
+				c.Writer.Flush()
+			case "thinking_done":
+				c.SSEvent("thinking_done", gin.H{})
+				c.Writer.Flush()
 			case "tool_call":
+				c.SSEvent("tool", ev)
+				c.Writer.Flush()
 				toolMsgs = append(toolMsgs, &schema.Message{
 					Role: schema.Assistant,
 					ToolCalls: []schema.ToolCall{{
@@ -88,7 +92,12 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 					}},
 				})
 			case "tool_result":
+				c.SSEvent("tool", ev)
+				c.Writer.Flush()
 				toolMsgs = append(toolMsgs, schema.ToolMessage(ev.Result, ev.CallID, schema.WithToolName(ev.Name)))
+			default:
+				c.SSEvent("tool", ev)
+				c.Writer.Flush()
 			}
 		}
 	}()
@@ -146,6 +155,7 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 			c.Writer.Flush()
 		}
 	}
+
 
 	// 持久化对话
 	var convMessages []*schema.Message

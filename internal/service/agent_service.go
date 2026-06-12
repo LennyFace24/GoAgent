@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	cfg "github.com/LennyFace24/MiniAgent/internal/config"
@@ -24,6 +25,7 @@ import (
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 )
+
 
 
 // ToolEvent 通过 SSE 推送给前端的工具事件
@@ -193,36 +195,49 @@ func (s *AgentService) runLoop(
 		streams := stream.Copy(2)
 		gen.Send(adk.EventFromMessage(nil, streams[0], schema.Assistant, ""))
 
-		fullMsg, err := schema.ConcatMessageStream(streams[1])
-		if err != nil {
-			gen.Send(&adk.AgentEvent{Err: err})
-			return
+		// 流式读取 streams[1]，实时发送 thinking delta
+		var thinkingBuilder strings.Builder
+		var toolCalls []schema.ToolCall
+		for {
+			chunk, err := streams[1].Recv()
+			if err != nil {
+				break
+			}
+			// thinking 内容实时发送
+			if chunk.Content != "" {
+				thinkingBuilder.WriteString(chunk.Content)
+				toolEvents <- ToolEvent{
+					Type:    "thinking_delta",
+					Content: chunk.Content,
+				}
+			}
+			// 收集 tool calls
+			if len(chunk.ToolCalls) > 0 {
+				toolCalls = append(toolCalls, chunk.ToolCalls...)
+			}
+		}
+		thinkingContent := thinkingBuilder.String()
+
+		// 发送 thinking 结束信号
+		if thinkingContent != "" {
+			toolEvents <- ToolEvent{Type: "thinking_done"}
 		}
 
-		log.Printf("[Turn %d] mode=%s ToolCalls 数量: %d", turn, mode, len(fullMsg.ToolCalls))
-		for i, tc := range fullMsg.ToolCalls {
+		log.Printf("[Turn %d] mode=%s ToolCalls 数量: %d", turn, mode, len(toolCalls))
+		for i, tc := range toolCalls {
 			log.Printf("[Turn %d] ToolCall[%d]: name=%s args=%s", turn, i, tc.Function.Name, tc.Function.Arguments)
 		}
 
-		if len(fullMsg.ToolCalls) == 0 {
+		if len(toolCalls) == 0 {
 			log.Printf("[Turn %d] 无 ToolCall，返回最终回答", turn)
 			return
 		}
 
-		// 发送思考内容：LLM 在决定调用工具前的推理
-		thinkingContent := fullMsg.Content
-		log.Printf("[Turn %d] 思考内容长度: %d, 内容: %s", turn, len(thinkingContent), thinkingContent)
-		if thinkingContent != "" {
-			toolEvents <- ToolEvent{
-				Type:    "thinking",
-				Content: thinkingContent,
-			}
-		}
 
 		// todo 提醒（仅 chat 模式）
 		if mode != "aiops" {
 			useTodo := false
-			for _, tc := range fullMsg.ToolCalls {
+			for _, tc := range toolCalls {
 				if tc.Function.Name == "write_todo" || tc.Function.Name == "read_todo" {
 					useTodo = true
 					break
@@ -237,17 +252,25 @@ func (s *AgentService) runLoop(
 			}
 		}
 
+		// 构造完整消息用于追加到历史
+		fullMsg := &schema.Message{
+			Role:      schema.Assistant,
+			Content:   thinkingContent,
+			ToolCalls: toolCalls,
+		}
 		messages = append(messages, fullMsg)
+
 
 		needReminder := mode != "aiops" && todoUncalledCount == 0
 
-		for _, tc := range fullMsg.ToolCalls {
+		for _, tc := range toolCalls {
 			toolEvents <- ToolEvent{
 				Type:   "tool_call",
 				Name:   tc.Function.Name,
 				Args:   tc.Function.Arguments,
 				CallID: tc.ID,
 			}
+
 
 			// 重复调用检测
 			argsHash := hex.EncodeToString(sha256.New().Sum([]byte(tc.Function.Arguments)))
@@ -353,8 +376,8 @@ func (s *AgentService) runLoop(
 		}
 	}
 
-	// 达到最大轮次，强制最后一轮直接回答
-	messages = append(messages, schema.UserMessage("你已调用足够多次工具，现在必须直接回答用户的问题。不要再调用任何工具。"))
+	// // 达到最大轮次，强制最后一轮直接回答
+	// messages = append(messages, schema.UserMessage("你已调用足够多次工具，现在必须直接回答用户的问题。不要再调用任何工具。"))
 	stream, err := s.toolModel.Stream(ctx, messages)
 	if err != nil {
 		gen.Send(&adk.AgentEvent{Err: err})

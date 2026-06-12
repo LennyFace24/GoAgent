@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick, toRef } from 'vue'
-import type { Message, PermissionMessage } from '../../../shared/types'
+import { ref, watch, onMounted, onUnmounted, nextTick, toRef } from 'vue'
+import type { Message, PermissionMessage, MessageGroup, ThinkingMessage, ToolCallMessage, ToolResultMessage, ChatMessage } from '../../../shared/types'
 import { useMessages } from '../composables/useMessages'
 import { useSSE } from '../composables/useSSE'
 import MessageBubble from './MessageBubble.vue'
@@ -24,6 +24,49 @@ const conversationIdRef = toRef(props, 'conversationId')
 const { messages, loadHistory } = useMessages(conversationIdRef)
 const { sending, send, abort, respondPermission } = useSSE(messages)
 
+// ---- 消息分组逻辑 ----
+const messageGroups = ref<MessageGroup[]>([])
+let currentGroup: MessageGroup = { thinking: null, toolCalls: [], toolResults: [], reply: null }
+
+// 监听消息数量变化，处理新增消息
+watch(() => messages.value.length, (newLen, oldLen) => {
+  const addedMessages = messages.value.slice(oldLen)
+  for (const msg of addedMessages) {
+    switch (msg.role) {
+      case 'thinking':
+        if (currentGroup.reply) {
+          messageGroups.value.push(currentGroup)
+          currentGroup = { thinking: msg as ThinkingMessage, toolCalls: [], toolResults: [], reply: null }
+        } else {
+          currentGroup.thinking = msg as ThinkingMessage
+        }
+        break
+      case 'tool_call':
+        currentGroup.toolCalls.push(msg as ToolCallMessage)
+        break
+      case 'tool_result':
+        currentGroup.toolResults.push(msg as ToolResultMessage)
+        break
+      case 'assistant':
+        currentGroup.reply = msg as ChatMessage
+        messageGroups.value.push(currentGroup)
+        currentGroup = { thinking: null, toolCalls: [], toolResults: [], reply: null }
+        break
+      // user 和 permission_req 不需要分组，直接渲染
+    }
+  }
+})
+
+// 对话切换时重置分组
+watch(() => props.conversationId, () => {
+  messageGroups.value = []
+  currentGroup = { thinking: null, toolCalls: [], toolResults: [], reply: null }
+})
+
+onUnmounted(() => {
+  messageGroups.value = []
+})
+
 function scrollBottom(): void {
   nextTick(() => {
     if (msgBox.value) msgBox.value.scrollTop = msgBox.value.scrollHeight
@@ -43,10 +86,11 @@ function handlePermission(msg: PermissionMessage, approved: boolean, always: boo
 
 onMounted(() => { loadHistory() })
 watch(() => props.conversationId, () => {
-  abort()       // 取消旧对话的 SSE 请求
-  loadHistory() // 加载新对话的消息
+  abort()
+  loadHistory()
 })
 </script>
+
 
 <template>
   <div class="chat-container">
@@ -56,26 +100,31 @@ watch(() => props.conversationId, () => {
       </div>
 
       <template v-for="msg in messages" :key="msg.id">
-        <ThinkingBlock
-          v-if="msg.role === 'thinking'"
-          :content="msg.content || ''"
-        />
-        <ToolCallBlock
-          v-else-if="msg.role === 'tool_call'"
-          :name="msg.name"
-          :args="msg.args"
-        />
-        <ToolResultBlock
-          v-else-if="msg.role === 'tool_result'"
-          :name="msg.name"
-          :result="msg.result"
-        />
+        <!-- 用户消息：直接渲染 -->
+        <MessageBubble v-if="msg.role === 'user'" :message="msg" />
+
+        <!-- 权限请求：直接渲染 -->
         <PermissionCard
           v-else-if="msg.role === 'permission_req'"
           :message="msg as PermissionMessage"
           @respond="(approved, always) => handlePermission(msg as PermissionMessage, approved, always)"
         />
-        <MessageBubble v-else :message="msg" />
+      </template>
+
+      <!-- AI 分组消息：按组渲染 -->
+      <template v-for="(group, idx) in messageGroups" :key="idx">
+        <ThinkingBlock v-if="group.thinking" :content="group.thinking.content" />
+
+        <template v-for="(tc, i) in group.toolCalls" :key="tc.id">
+          <ToolCallBlock :name="tc.name" :args="tc.args" />
+          <ToolResultBlock
+            v-if="group.toolResults[i]"
+            :name="group.toolResults[i].name"
+            :result="group.toolResults[i].result"
+          />
+        </template>
+
+        <MessageBubble v-if="group.reply" :message="group.reply" />
       </template>
     </div>
 
@@ -87,6 +136,7 @@ watch(() => props.conversationId, () => {
     />
   </div>
 </template>
+
 
 <style scoped>
 .chat-container {
