@@ -2,12 +2,9 @@ package service
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
-	"strings"
 	"time"
 
 	cfg "github.com/LennyFace24/MiniAgent/internal/config"
@@ -137,17 +134,7 @@ func (s *AgentService) Stream(ctx context.Context,
 
 
 
-// callRecord 记录一次工具调用，用于重复检测
-type callRecord struct {
-	name     string
-	argsHash string
-}
 
-// allowRepeatTools 允许重复调用的工具白名单（幂等查询类）
-var allowRepeatTools = map[string]bool{
-	"context_status": true,
-	"list_tasks":     true,
-}
 
 func (s *AgentService) runLoop(
 	ctx context.Context,
@@ -166,7 +153,6 @@ func (s *AgentService) runLoop(
 	const maxTurns = 20
 	turn := 0
 	todoUncalledCount := 0
-	recentCalls := make([]callRecord, 0, 20) // 重复调用检测滑动窗口
 
 
 	for {
@@ -192,36 +178,35 @@ func (s *AgentService) runLoop(
 			return
 		}
 
+		// 流式发送给前端（streams[0]），同时本地收集 tool calls（streams[1]）
 		streams := stream.Copy(2)
 		gen.Send(adk.EventFromMessage(nil, streams[0], schema.Assistant, ""))
 
-		// 流式读取 streams[1]，实时发送 thinking delta
-		var thinkingBuilder strings.Builder
+		// 读取 streams[1] 收集 tool calls（流式累积，按位置合并分片的 arguments）
 		var toolCalls []schema.ToolCall
 		for {
 			chunk, err := streams[1].Recv()
 			if err != nil {
 				break
 			}
-			// thinking 内容实时发送
-			if chunk.Content != "" {
-				thinkingBuilder.WriteString(chunk.Content)
-				toolEvents <- ToolEvent{
-					Type:    "thinking_delta",
-					Content: chunk.Content,
+			for i, tc := range chunk.ToolCalls {
+				if i < len(toolCalls) {
+					// 同位置的 tool call，追加 arguments
+					toolCalls[i].Function.Arguments += tc.Function.Arguments
+					if tc.Function.Name != "" {
+						toolCalls[i].Function.Name = tc.Function.Name
+					}
+					if tc.ID != "" {
+						toolCalls[i].ID = tc.ID
+					}
+				} else {
+					// 新的 tool call
+					toolCalls = append(toolCalls, tc)
 				}
 			}
-			// 收集 tool calls
-			if len(chunk.ToolCalls) > 0 {
-				toolCalls = append(toolCalls, chunk.ToolCalls...)
-			}
 		}
-		thinkingContent := thinkingBuilder.String()
 
-		// 发送 thinking 结束信号
-		if thinkingContent != "" {
-			toolEvents <- ToolEvent{Type: "thinking_done"}
-		}
+
 
 		log.Printf("[Turn %d] mode=%s ToolCalls 数量: %d", turn, mode, len(toolCalls))
 		for i, tc := range toolCalls {
@@ -232,7 +217,6 @@ func (s *AgentService) runLoop(
 			log.Printf("[Turn %d] 无 ToolCall，返回最终回答", turn)
 			return
 		}
-
 
 		// todo 提醒（仅 chat 模式）
 		if mode != "aiops" {
@@ -255,11 +239,9 @@ func (s *AgentService) runLoop(
 		// 构造完整消息用于追加到历史
 		fullMsg := &schema.Message{
 			Role:      schema.Assistant,
-			Content:   thinkingContent,
 			ToolCalls: toolCalls,
 		}
 		messages = append(messages, fullMsg)
-
 
 		needReminder := mode != "aiops" && todoUncalledCount == 0
 
@@ -271,26 +253,6 @@ func (s *AgentService) runLoop(
 				CallID: tc.ID,
 			}
 
-
-			// 重复调用检测
-			argsHash := hex.EncodeToString(sha256.New().Sum([]byte(tc.Function.Arguments)))
-			isRepeat := false
-			if !allowRepeatTools[tc.Function.Name] {
-				repeatCount := 0
-				for _, r := range recentCalls {
-					if r.name == tc.Function.Name && r.argsHash == argsHash {
-						repeatCount++
-					}
-				}
-				if repeatCount >= 2 {
-					isRepeat = true
-				}
-			}
-			recentCalls = append(recentCalls, callRecord{name: tc.Function.Name, argsHash: argsHash})
-			if len(recentCalls) > 20 {
-				recentCalls = recentCalls[1:]
-			}
-
 			var toolInput map[string]any
 			json.Unmarshal([]byte(tc.Function.Arguments), &toolInput)
 			if toolInput == nil {
@@ -299,12 +261,6 @@ func (s *AgentService) runLoop(
 
 			decision := s.perms.Check(tc.Function.Name, toolInput)
 			var result string
-
-			if isRepeat {
-				result = "[系统] 此工具调用与之前完全相同，已跳过执行。请基于已有信息直接回答，不要重复调用。"
-				log.Printf("[Turn %d] 检测到重复调用: %s, args=%s", turn, tc.Function.Name, tc.Function.Arguments)
-			} else {
-
 
 			switch decision.Behavior {
 			case permission.BehaviorDeny:
@@ -357,8 +313,6 @@ func (s *AgentService) runLoop(
 				result = result + "\n\n[系统提醒] 你已经连续多轮未更新待办事项，请立即调用 read_todo 和 write_todo 更新当前任务进度。"
 				needReminder = false
 			}
-			} // end else (!isRepeat)
-
 
 			toolEvents <- ToolEvent{
 				Type:   "tool_result",
@@ -371,9 +325,11 @@ func (s *AgentService) runLoop(
 			messages = append(messages, msg)
 		}
 
+
 		if turn >= maxTurns {
 			break
 		}
+		turn++
 	}
 
 	// // 达到最大轮次，强制最后一轮直接回答
@@ -385,6 +341,7 @@ func (s *AgentService) runLoop(
 	}
 	gen.Send(adk.EventFromMessage(nil, stream, schema.Assistant, ""))
 }
+
 
 func (s *AgentService) executeTool(ctx context.Context, tc schema.ToolCall) (string, error) {
 	for _, t := range s.tools {

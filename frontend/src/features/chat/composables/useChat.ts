@@ -1,5 +1,5 @@
 import { ref, type Ref } from 'vue'
-import type { Message } from '../../../shared/types'
+import type { Message, ToolEventData } from '../../../shared/types'
 
 // ---------- 聊天核心 composable ----------
 
@@ -9,6 +9,7 @@ export interface UseChatOptions {
   chatMode: Ref<'chat' | 'aiops'>
   scrollToBottom: () => void
 }
+
 
 export function useChat(options: UseChatOptions) {
   const { messages, conversationId, chatMode, scrollToBottom } = options
@@ -28,29 +29,15 @@ export function useChat(options: UseChatOptions) {
     })
     scrollToBottom()
 
-    // 添加 AI 思考消息
     isSending.value = true
-    const aiMessageId = Date.now() + 1
-    messages.value.push({
-      id: aiMessageId,
-      role: 'assistant',
-      content: '',
-      isThinking: true,
-      isGenerating: false,
-    })
-    scrollToBottom()
-
-    // 创建 abort controller
     const abortCtrl = new AbortController()
     activeAbort = abortCtrl
-
     try {
-      const base = import.meta.env.VITE_API_URL || window.location.origin
-      const endpoint = chatMode.value === 'aiops' ? '/api/ai_ops' : '/api/chat_stream'
-      const url = base + endpoint
-      console.log('[useChat] 请求 URL:', url)
-      const res = await fetch(url, {
-
+      // 直连后端，绕过 Vite 代理（Vite 代理不支持 SSE chunked 编码）
+      const base = import.meta.env.VITE_API_URL
+        || (import.meta.env.DEV ? 'http://127.0.0.1:8080' : window.location.origin)
+      const endpoint = chatMode.value === 'chat' ? '/api/chat_stream' : '/api/ai_ops'
+      const res = await fetch(base + endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ message: text, conversation_id: conversationId.value }),
@@ -58,25 +45,31 @@ export function useChat(options: UseChatOptions) {
       })
 
 
+
       if (!res.ok) {
-        updateAiMessage(aiMessageId, {
-          isThinking: false,
+        messages.value.push({
+          id: Date.now(),
+          role: 'assistant',
           content: `[HTTP ${res.status}] 请求失败`,
         })
         return
       }
 
-      await readSSEStream(res, aiMessageId, abortCtrl)
+      if (!res.body) return
+      await readSSEStream(res, abortCtrl)
     } catch (err) {
+      console.error('[useChat] 请求错误:', err)
       if (err instanceof Error && err.name === 'AbortError') return
-      updateAiMessage(aiMessageId, {
-        isThinking: false,
-        isGenerating: false,
+      messages.value.push({
+        id: Date.now(),
+        role: 'assistant',
         content: '请求失败，请重试',
       })
     } finally {
-      if (!abortCtrl.signal.aborted) {
-        updateAiMessage(aiMessageId, { isThinking: false, isGenerating: false })
+      // 结束流式状态
+      const last = messages.value[messages.value.length - 1]
+      if (last && last.role === 'assistant') {
+        last.streaming = false
       }
       if (activeAbort === abortCtrl) {
         activeAbort = null
@@ -86,7 +79,7 @@ export function useChat(options: UseChatOptions) {
   }
 
   // 读取 SSE 流
-  async function readSSEStream(res: Response, aiMessageId: number, abortCtrl: AbortController) {
+  async function readSSEStream(res: Response, abortCtrl: AbortController) {
     const reader = res.body!.getReader()
     const decoder = new TextDecoder()
     let buffer = ''
@@ -99,17 +92,14 @@ export function useChat(options: UseChatOptions) {
 
       const { done, value } = await reader.read()
       if (done) break
-      const chunk = decoder.decode(value, { stream: true })
-      console.log('[useChat] 收到数据:', JSON.stringify(chunk))
-      buffer += chunk
+      buffer += decoder.decode(value, { stream: true })
 
-      // 按双换行分割完整事件
+      // 按双换行分割完整 SSE 事件
       const events = buffer.split('\n\n')
       buffer = events.pop() || ''
 
       for (const event of events) {
         if (!event.trim()) continue
-        console.log('[useChat] 处理事件:', JSON.stringify(event))
 
         let eventType = ''
         let eventData = ''
@@ -123,134 +113,149 @@ export function useChat(options: UseChatOptions) {
         }
 
         if (!eventData) continue
-        console.log('[useChat] 解析:', eventType, eventData.slice(0, 100))
-        handleSSEEvent(eventType, eventData, aiMessageId)
+        console.log('[useChat] SSE:', eventType, eventData.slice(0, 80))
+        handleSSEEvent(eventType, eventData)
       }
     }
   }
 
 
   // 处理 SSE 事件
-  function handleSSEEvent(event: string, payload: string, aiMessageId: number) {
-    switch (event) {
-      case 'thinking':
-        // AI 开始思考/生成
-        updateAiMessage(aiMessageId, { isThinking: false, isGenerating: true })
-        break
-      case 'delta':
-        handleDeltaEvent(payload, aiMessageId)
-        break
-      case 'message':
-        handleMessageEvent(payload, aiMessageId)
-        break
-      case 'tool':
-        handleToolEvent(payload, aiMessageId)
-        break
-      case 'done':
-        updateAiMessage(aiMessageId, { isThinking: false, isGenerating: false })
-        break
-      case 'error':
-        handleErrorEvent(payload, aiMessageId)
-        break
+  function handleSSEEvent(event: string, payload: string) {
+    try {
+      const data = JSON.parse(payload)
+
+
+      // ---- thinking_delta: 流式思维链 ----
+      if (event === 'thinking_delta' && data.content) {
+        const last = messages.value[messages.value.length - 1]
+        if (last && last.role === 'thinking' && last.streaming) {
+          last.content += data.content
+        } else {
+          messages.value.push({
+            id: Date.now() + Math.random(),
+            role: 'thinking',
+            content: data.content,
+            streaming: true,
+          })
+        }
+        scrollToBottom()
+        return
+      }
+
+      // ---- thinking_done ----
+      if (event === 'thinking_done') {
+        const last = messages.value[messages.value.length - 1]
+        if (last && last.role === 'thinking') {
+          last.streaming = false
+        }
+        return
+      }
+
+      // ---- tool 事件 ----
+      if (event === 'tool') {
+        handleToolEvent(data as ToolEventData)
+        scrollToBottom()
+        return
+      }
+
+      // ---- delta（流式文本）----
+      if (event === 'delta' && data.content) {
+        appendAssistant(data.content)
+        scrollToBottom()
+        return
+      }
+
+      // ---- message（非流式文本）----
+      if (event === 'message' && data.content) {
+        appendAssistant(data.content)
+        scrollToBottom()
+        return
+      }
+
+      // ---- error ----
+      if (event === 'error' || data.error) {
+        appendAssistant(`\n\n[错误: ${data.error || '未知错误'}]`)
+        return
+      }
+
+      // ---- 未知事件，尝试作为 delta ----
+      if (data.content) {
+        appendAssistant(data.content)
+        scrollToBottom()
+      }
+    } catch { /* ignore parse errors */ }
+  }
+
+  // 追加文本到 assistant 消息
+  function appendAssistant(content: string) {
+    const last = messages.value[messages.value.length - 1]
+    if (last && last.role === 'assistant' && last.streaming) {
+      last.content += content
+    } else {
+      messages.value.push({
+        id: Date.now() + Math.random(),
+        role: 'assistant',
+        content,
+        streaming: true,
+      })
+
     }
-    scrollToBottom()
   }
 
-  // 处理 delta 事件
-  function handleDeltaEvent(payload: string, aiMessageId: number) {
-    try {
-      const data = JSON.parse(payload)
-      const aiMsg = findAiMessage(aiMessageId)
-      if (aiMsg && data.content) {
-        aiMsg.isThinking = false
-        aiMsg.isGenerating = true
-        aiMsg.content = (aiMsg.content || '') + data.content
-      }
-    } catch { /* ignore */ }
-  }
-
-  // 处理 message 事件
-  function handleMessageEvent(payload: string, aiMessageId: number) {
-    try {
-      const data = JSON.parse(payload)
-      const aiMsg = findAiMessage(aiMessageId)
-      if (aiMsg && data.content) {
-        aiMsg.isThinking = false
-        aiMsg.isGenerating = false
-        aiMsg.content = data.content
-      }
-    } catch { /* ignore */ }
-  }
 
   // 处理 tool 事件
-  function handleToolEvent(payload: string, aiMessageId: number) {
-    try {
-      const ev = JSON.parse(payload)
-      const aiMsg = findAiMessage(aiMessageId)
-      if (aiMsg) {
-        aiMsg.isThinking = false
-        aiMsg.isGenerating = false
-      }
-
-      switch (ev.type) {
-        case 'tool_call':
-          messages.value.push({
-            id: Date.now() + Math.random(),
-            role: 'tool_call',
-            name: ev.name,
-            args: ev.args,
-            callId: ev.call_id,
-          })
-          break
-        case 'tool_result':
-          messages.value.push({
-            id: Date.now() + Math.random(),
-            role: 'tool_result',
-            name: ev.name,
-            result: ev.result,
-            callId: ev.call_id,
-          })
-          break
-        case 'permission_request':
-          messages.value.push({
-            id: Date.now() + Math.random(),
-            role: 'permission_req',
-            name: ev.name,
-            args: ev.args,
-            requestId: ev.request_id,
-            reason: ev.reason,
-            callId: ev.call_id,
-            responded: false,
-          })
-          break
-      }
-    } catch { /* ignore */ }
-  }
-
-  // 处理 error 事件
-  function handleErrorEvent(payload: string, aiMessageId: number) {
-    try {
-      const data = JSON.parse(payload)
-      const aiMsg = findAiMessage(aiMessageId)
-      if (aiMsg) {
-        aiMsg.isThinking = false
-        aiMsg.isGenerating = false
-        aiMsg.content = (aiMsg.content || '') + `\n\n[错误: ${data.error}]`
-      }
-    } catch { /* ignore */ }
-  }
-
-  // 查找 AI 消息
-  function findAiMessage(id: number): Message | undefined {
-    return messages.value.find((m) => m.id === id)
-  }
-
-  // 更新 AI 消息
-  function updateAiMessage(id: number, updates: Partial<Message>) {
-    const aiMsg = findAiMessage(id)
-    if (aiMsg) {
-      Object.assign(aiMsg, updates)
+  function handleToolEvent(ev: ToolEventData) {
+    console.log('[useChat] tool event:', ev.type, ev.name, ev.request_id)
+    switch (ev.type) {
+      case 'tool_call':
+        messages.value.push({
+          id: Date.now() + Math.random(),
+          role: 'tool_call',
+          name: ev.name,
+          args: ev.args,
+          callId: ev.call_id,
+        })
+        break
+      case 'tool_result':
+        messages.value.push({
+          id: Date.now() + Math.random(),
+          role: 'tool_result',
+          name: ev.name,
+          result: ev.result,
+          callId: ev.call_id,
+          collapsed: true,
+        })
+        break
+      case 'permission_request':
+        console.warn('[useChat] permission_request:', ev.name, ev.request_id)
+        messages.value.push({
+          id: Date.now() + Math.random(),
+          role: 'permission_req',
+          requestId: ev.request_id!,
+          name: ev.name,
+          args: ev.args,
+          reason: ev.reason,
+          responded: false,
+        })
+        break
     }
+  }
+
+
+  // 权限响应
+  async function respondPermission(msg: Message, approved: boolean, always = false) {
+    if (msg.role !== 'permission_req') return
+    msg.responded = true
+    msg.approved = approved
+    try {
+      const base = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://127.0.0.1:8080' : window.location.origin)
+      await fetch(base + '/api/permission/response', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: msg.requestId, approved, always }),
+      })
+    } catch { /* ignore */ }
   }
 
   // 中止当前请求
@@ -259,30 +264,25 @@ export function useChat(options: UseChatOptions) {
       activeAbort.abort()
       activeAbort = null
     }
+    isSending.value = false
   }
 
   // 加载历史记录
   async function loadHistory(defaultMessage: string) {
     messages.value = []
+
     try {
-      const res = await fetch(`/api/conversation/${conversationId.value}`)
+      const base = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://127.0.0.1:8080' : window.location.origin)
+      const res = await fetch(`${base}/api/conversation/${conversationId.value}`)
       if (!res.ok) {
-        messages.value.push({
-          id: Date.now(),
-          role: 'assistant',
-          content: defaultMessage,
-        })
+        messages.value.push({ id: Date.now(), role: 'assistant', content: defaultMessage })
         return
       }
       const data = await res.json()
-      const lines = data.messages || []
+      const lines: Array<{ role: string; content: string; tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>; tool_call_id?: string; tool_name?: string }> = data.messages || []
       for (const line of lines) {
         if (line.role === 'user') {
-          messages.value.push({
-            id: Date.now() + Math.random(),
-            role: 'user',
-            content: line.content,
-          })
+          messages.value.push({ id: Date.now() + Math.random(), role: 'user', content: line.content })
         } else if (line.role === 'assistant') {
           if (line.tool_calls) {
             for (const tc of line.tool_calls) {
@@ -296,11 +296,7 @@ export function useChat(options: UseChatOptions) {
             }
           }
           if (line.content) {
-            messages.value.push({
-              id: Date.now() + Math.random(),
-              role: 'assistant',
-              content: line.content,
-            })
+            messages.value.push({ id: Date.now() + Math.random(), role: 'assistant', content: line.content })
           }
         } else if (line.role === 'tool') {
           messages.value.push({
@@ -313,18 +309,10 @@ export function useChat(options: UseChatOptions) {
         }
       }
       if (messages.value.length === 0) {
-        messages.value.push({
-          id: Date.now(),
-          role: 'assistant',
-          content: defaultMessage,
-        })
+        messages.value.push({ id: Date.now(), role: 'assistant', content: defaultMessage })
       }
     } catch {
-      messages.value.push({
-        id: Date.now(),
-        role: 'assistant',
-        content: defaultMessage,
-      })
+      messages.value.push({ id: Date.now(), role: 'assistant', content: defaultMessage })
     }
   }
 
@@ -333,5 +321,6 @@ export function useChat(options: UseChatOptions) {
     send,
     abort,
     loadHistory,
+    respondPermission,
   }
 }

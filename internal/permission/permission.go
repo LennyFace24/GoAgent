@@ -1,12 +1,16 @@
 package permission
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sync"
 
 	basictool "github.com/LennyFace24/MiniAgent/internal/tools/basic_tool"
 )
+
+
 
 // ---------- 权限模式 ----------
 
@@ -82,19 +86,93 @@ func NewPermissionManager(mode Mode) *PermissionManager {
 	}
 }
 
+// ---------- 配置文件结构 ----------
+
+type permissionFile struct {
+	Permissions permissionRules `json:"permissions"`
+}
+
+type permissionRules struct {
+	Allow       []string `json:"allow"`
+	Ask         []string `json:"ask"`
+	Deny        []string `json:"deny"`
+	DefaultMode string   `json:"defaultMode"`
+}
+
+func loadPermissionConfig(path string) []Rule {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	var file permissionFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return nil
+	}
+
+	var rules []Rule
+
+	// deny 规则（优先级最高）
+	for _, d := range file.Permissions.Deny {
+		tool, content := parseBashPattern(d)
+		rules = append(rules, Rule{Tool: tool, Content: content, Behavior: BehaviorDeny})
+	}
+
+	// ask 规则
+	for _, a := range file.Permissions.Ask {
+		tool, content := parseBashPattern(a)
+		rules = append(rules, Rule{Tool: tool, Content: content, Behavior: "ask"})
+	}
+
+	// allow 规则
+	for _, a := range file.Permissions.Allow {
+		tool, content := parseBashPattern(a)
+		rules = append(rules, Rule{Tool: tool, Content: content, Behavior: BehaviorAllow})
+	}
+
+	return rules
+}
+
+// parseBashPattern 解析 "Bash(command *)" 格式，返回 tool 和 content
+// 例如: "Bash(ls *)" → tool="bash", content="ls *"
+//       "read_file" → tool="read_file", content=""
+func parseBashPattern(pattern string) (string, string) {
+	if len(pattern) > 6 && pattern[:6] == "Bash(" && pattern[len(pattern)-1] == ')' {
+		inner := pattern[6 : len(pattern)-1]
+		return "bash", inner
+	}
+	return pattern, ""
+}
+
 func defaultRules() []Rule {
+	// 从配置文件加载
+	rules := loadPermissionConfig("permission.json")
+	if len(rules) > 0 {
+		return rules
+	}
+	// 回退到硬编码默认值
 	return []Rule{
-		// deny: 危险命令
 		{Tool: "bash", Content: "rm -rf /", Behavior: BehaviorDeny},
 		{Tool: "bash", Content: "sudo *", Behavior: BehaviorDeny},
-		// allow: 所有只读工具
-		{Tool: "read_file", Path: "*", Behavior: BehaviorAllow},
+		{Tool: "read_file", Behavior: BehaviorAllow},
+		{Tool: "write_file", Behavior: BehaviorAllow},
+		{Tool: "edit_file", Behavior: BehaviorAllow},
+		{Tool: "bash", Behavior: BehaviorAllow},
 		{Tool: "knowledge_search", Behavior: BehaviorAllow},
 		{Tool: "health_check", Behavior: BehaviorAllow},
 		{Tool: "read_todo", Behavior: BehaviorAllow},
+		{Tool: "write_todo", Behavior: BehaviorAllow},
 		{Tool: "skill", Behavior: BehaviorAllow},
+		{Tool: "task", Behavior: BehaviorAllow},
+		{Tool: "subproxy", Behavior: BehaviorAllow},
+		{Tool: "compact", Behavior: BehaviorAllow},
+		{Tool: "context_status", Behavior: BehaviorAllow},
+		{Tool: "create_task", Behavior: BehaviorAllow},
+		{Tool: "update_task_status", Behavior: BehaviorAllow},
+		{Tool: "get_task", Behavior: BehaviorAllow},
+		{Tool: "list_tasks", Behavior: BehaviorAllow},
 	}
 }
+
 
 // ---------- 核心：四阶段管道 ----------
 

@@ -13,11 +13,12 @@ const { render } = useMarkdown()
     </div>
   </div>
   <div v-else-if="props.message.role === 'assistant'" class="msg-row assistant">
-    <div class="msg-body">
+    <div class="msg-bubble assistant-bubble">
       <div class="msg-content md" v-html="render(props.message.content || '')"></div>
-      <span v-if="props.message.streaming" class="typing-cursor">|</span>
     </div>
   </div>
+
+
 </template>
 
 <style scoped>
@@ -36,6 +37,14 @@ const { render } = useMarkdown()
   max-width: 72%;
   padding: 10px 16px;
 }
+.msg-bubble.assistant-bubble {
+  background: var(--bg-chat-bubble);
+  border: 1px solid var(--border-color);
+  border-radius: 16px 16px 16px 4px;
+  max-width: 82%;
+  padding: 10px 16px;
+}
+
 
 .msg-body {
   max-width: 82%;
@@ -180,16 +189,5 @@ const { render } = useMarkdown()
   padding: 2px 6px;
   border-radius: 4px;
 }
-
-.typing-cursor {
-  display: inline;
-  color: var(--accent);
-  animation: blink 0.6s steps(1) infinite;
-}
-
-@keyframes blink {
-  50% {
-    opacity: 0;
-  }
-}
 </style>
+

@@ -4,11 +4,18 @@ export default { name: 'ChatWorkspace' }
 
 <script setup lang="ts">
 import { ref, watch, onMounted, onActivated, nextTick } from 'vue'
+import type { Message } from '../../../shared/types'
 import ContextStatus from './ContextStatus.vue'
 import CommandPalette from './CommandPalette.vue'
+import ThinkingBlock from './ThinkingBlock.vue'
+import ToolCallBlock from './ToolCallBlock.vue'
+import ToolResultBlock from './ToolResultBlock.vue'
+import PermissionCard from './PermissionCard.vue'
+import MessageBubble from './MessageBubble.vue'
+import LoadingCard from './LoadingCard.vue'
+
 import { useCommands, type Command } from '../composables/useCommands'
 import { useChat } from '../composables/useChat'
-import { Wrench, CheckCircle, Lock, ChevronUp, ChevronDown } from 'lucide-vue-next'
 
 // ---------- Props & Emits ----------
 
@@ -23,21 +30,26 @@ const emit = defineEmits<{
 
 // ---------- 状态 ----------
 
-const messages = ref<any[]>([])
+const messages = ref<Message[]>([])
 const inputText = ref('')
 const msgArea = ref<HTMLElement | null>(null)
 const chatMode = ref<'chat' | 'aiops'>('aiops')
-
-// ---------- Composables ----------
-
 const conversationIdRef = ref(props.conversationId)
 
-// 监听 prop 变化，同步更新 ref
 watch(() => props.conversationId, (newId) => {
   conversationIdRef.value = newId
 })
 
-const { isSending, send, abort, loadHistory } = useChat({
+// 新消息自动滚底
+watch(() => messages.value.length, () => {
+  scrollToBottom()
+})
+
+// ---------- Composables ----------
+
+const DEFAULT_WELCOME = '您好，我是您的智能运维助手！您可以输入问题进行分析，或者点击右上角查看 🖥️ 实时系统状态 面板。'
+
+const { isSending, send, abort, loadHistory, respondPermission } = useChat({
   messages,
   conversationId: conversationIdRef,
   chatMode,
@@ -66,13 +78,9 @@ watch(() => props.conversationId, () => {
 
 // ---------- 工具函数 ----------
 
-const DEFAULT_WELCOME = '您好，我是您的智能运维助手！您可以输入问题进行分析，或者点击右上角查看 🖥️ 实时系统状态 面板。'
-
 function scrollToBottom() {
   nextTick(() => {
-    if (msgArea.value) {
-      msgArea.value.scrollTop = msgArea.value.scrollHeight
-    }
+    if (msgArea.value) msgArea.value.scrollTop = msgArea.value.scrollHeight
   })
 }
 
@@ -124,7 +132,8 @@ function executeCommand(name: string): void {
 
 async function showContextStatus() {
   try {
-    const res = await fetch('/context')
+    const base = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://127.0.0.1:8080' : window.location.origin)
+    const res = await fetch(`${base}/api/context/status`)
     if (res.ok) {
       const data = await res.json()
       messages.value.push({
@@ -140,18 +149,7 @@ function showHelp() {
   messages.value.push({
     id: Date.now(),
     role: 'assistant',
-    content: `📖 **可用命令**
-
-| 命令 | 说明 |
-|------|------|
-| /help | 显示此帮助信息 |
-| /clear | 清空当前对话 |
-| /new | 新建对话 |
-| /compact | 触发上下文压缩 |
-| /context | 显示上下文状态 |
-| /model | 显示模型信息 |
-
-输入 \`/\` 可快速选择命令。`,
+    content: `📖 **可用命令**\n\n| 命令 | 说明 |\n|------|------|\n| /help | 显示此帮助信息 |\n| /clear | 清空当前对话 |\n| /new | 新建对话 |\n| /compact | 触发上下文压缩 |\n| /context | 显示上下文状态 |\n| /model | 显示模型信息 |`,
   })
 }
 
@@ -165,6 +163,13 @@ function showModelInfo() {
 
 // ---------- 输入处理 ----------
 
+function handleSend() {
+  const text = inputText.value.trim()
+  if (!text) return
+  inputText.value = ''
+  send(text)
+}
+
 function onInputKeydown(e: KeyboardEvent): void {
   if (paletteVisible.value) {
     const handled = onCommandKeydown(e)
@@ -174,34 +179,6 @@ function onInputKeydown(e: KeyboardEvent): void {
     e.preventDefault()
     handleSend()
   }
-}
-
-function handleSend(): void {
-  const text = inputText.value.trim()
-  if (!text) return
-  inputText.value = ''
-  send(text)
-}
-
-// ---------- 权限响应 ----------
-
-async function respondPermission(msg: any, approved: boolean) {
-  if (msg.role !== 'permission_req' || !msg.requestId) return
-  msg.responded = true
-  try {
-    await fetch('/api/permission/response', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: msg.requestId, approved }),
-    })
-  } catch { /* ignore */ }
-}
-
-// ---------- 工具折叠 ----------
-
-const expandedTools = ref<Record<number, boolean>>({})
-function toggleTool(index: number) {
-  expandedTools.value[index] = !expandedTools.value[index]
 }
 
 // ---------- 生命周期 ----------
@@ -235,68 +212,54 @@ onActivated(() => {
       </div>
     </div>
 
-    <!-- Messages -->
+    <!-- Messages：每条消息按 role 渲染，user 右对齐，其余左对齐 -->
     <div class="message-area" ref="msgArea">
-      <div v-for="(msg, index) in messages" :key="msg.id" class="message-row">
-        <!-- User Message -->
-        <div v-if="msg.role === 'user'" class="bubble user">
-          {{ msg.content }}
-        </div>
+      <div
+        v-for="msg in messages"
+        :key="msg.id"
+        class="msg-item"
+      >
 
-        <!-- Assistant Message -->
-        <div v-else-if="msg.role === 'assistant'" class="bubble assistant">
-          <div v-if="msg.isThinking" class="thinking-loader">
-            <span class="loader-dot"></span>
-            <span class="loader-dot"></span>
-            <span class="loader-dot"></span>
-          </div>
-          <div v-else-if="msg.isGenerating || msg.content" class="markdown-body">
-            {{ msg.content }}
-            <span v-if="msg.isGenerating" class="blinking-cursor">|</span>
-          </div>
-        </div>
 
-        <!-- Tool Call -->
-        <div v-else-if="msg.role === 'tool_call'" class="toolchain-block">
-          <div class="toolchain-header" @click="toggleTool(index)">
-            <Wrench :size="14" class="tool-status-icon" />
-            <span class="tool-summary">AI 正在调度工具: <strong>{{ msg.name }}</strong></span>
-            <component :is="expandedTools[index] ? ChevronUp : ChevronDown" :size="14" class="accordion-arrow" />
-          </div>
-          <div v-if="expandedTools[index]" class="toolchain-detail">
-            <pre class="code-pre">参数: {{ msg.args }}</pre>
-          </div>
-        </div>
 
-        <!-- Tool Result -->
-        <div v-else-if="msg.role === 'tool_result'" class="toolchain-block result">
-          <div class="toolchain-header" @click="toggleTool(index)">
-            <CheckCircle :size="14" class="tool-status-icon success" />
-            <span class="tool-summary">工具 <strong>{{ msg.name }}</strong> 执行完成</span>
-            <component :is="expandedTools[index] ? ChevronUp : ChevronDown" :size="14" class="accordion-arrow" />
-          </div>
-          <div v-if="expandedTools[index]" class="toolchain-detail">
-            <pre class="code-pre">{{ msg.result }}</pre>
-          </div>
-        </div>
+        <!-- user / assistant → MessageBubble（内部已有气泡区分）-->
+        <MessageBubble
+          v-if="msg.role === 'user' || msg.role === 'assistant'"
+          :message="msg"
+        />
 
-        <!-- Permission Request -->
-        <div v-else-if="msg.role === 'permission_req'" class="toolchain-block permission">
-          <div class="toolchain-header">
-            <Lock :size="14" class="tool-status-icon" />
-            <span class="tool-summary">权限请求: <strong>{{ msg.name }}</strong></span>
-          </div>
-          <div class="toolchain-detail">
-            <p class="perm-reason">{{ msg.reason }}</p>
-            <div class="perm-actions" v-if="!msg.responded">
-              <button class="perm-btn deny" @click="respondPermission(msg, false)">拒绝</button>
-              <button class="perm-btn allow" @click="respondPermission(msg, true)">允许</button>
-            </div>
-            <p v-else class="perm-status">已响应</p>
-          </div>
-        </div>
+        <!-- thinking → ThinkingBlock -->
+        <ThinkingBlock
+          v-else-if="msg.role === 'thinking'"
+          :content="msg.content || ''"
+        />
+
+        <!-- tool_call → ToolCallBlock -->
+        <ToolCallBlock
+          v-else-if="msg.role === 'tool_call'"
+          :name="msg.name"
+          :args="msg.args"
+        />
+
+        <!-- tool_result → ToolResultBlock -->
+        <ToolResultBlock
+          v-else-if="msg.role === 'tool_result'"
+          :name="msg.name"
+          :result="msg.result"
+        />
+
+        <!-- permission_req → PermissionCard -->
+        <PermissionCard
+          v-else-if="msg.role === 'permission_req'"
+          :message="msg"
+          @respond="(approved: boolean, always: boolean) => respondPermission(msg, approved, always)"
+        />
       </div>
+
+      <!-- AI 思考中 Loading -->
+      <LoadingCard v-if="isSending" />
     </div>
+
 
     <!-- Quick Actions -->
     <div class="input-section">
@@ -363,13 +326,12 @@ onActivated(() => {
 
 /* Header */
 .workspace-header {
-  height: 60px;
-  border-bottom: 1px solid var(--border-color);
-  padding: 0 24px;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  flex-shrink: 0;
+  padding: 12px 20px;
+  border-bottom: 1px solid var(--border-color);
+  background: var(--bg-secondary);
 }
 
 .header-info {
@@ -379,18 +341,17 @@ onActivated(() => {
 }
 
 .active-title {
-  font-weight: 700;
-  font-size: 0.95rem;
-  color: var(--text-heading);
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--text-primary);
 }
 
 .model-badge {
-  font-size: 0.65rem;
-  background: var(--bg-hover);
-  border: 1px solid var(--border-color);
+  font-size: 11px;
   padding: 2px 8px;
-  border-radius: 6px;
-  color: var(--text-muted);
+  border-radius: 10px;
+  background: var(--bg-active);
+  color: var(--text-secondary);
 }
 
 .header-actions {
@@ -400,216 +361,64 @@ onActivated(() => {
 }
 
 .monitor-toggle-btn {
-  background: var(--bg-input);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
   border: 1px solid var(--border-color);
-  color: var(--text-primary);
-  padding: 6px 14px;
-  border-radius: var(--radius-md);
-  font-size: 0.78rem;
-  font-weight: 600;
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
   cursor: pointer;
-  transition: var(--transition-fast);
+  transition: all 0.2s;
 }
 
-.monitor-toggle-btn:hover,
+.monitor-toggle-btn:hover {
+  background: var(--bg-hover);
+}
+
 .monitor-toggle-btn.active {
   background: var(--accent);
   color: white;
   border-color: var(--accent);
 }
 
-/* Messages */
+/* Message Area */
 .message-area {
   flex: 1;
   overflow-y: auto;
-  padding: 24px 32px;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+  padding: 20px;
 }
 
-.message-row {
-  display: flex;
-  flex-direction: column;
-}
-
-.bubble {
-  max-width: 85%;
-  padding: 12px 16px;
-  border-radius: 12px;
-  font-size: 0.85rem;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
-.bubble.user {
-  align-self: flex-end;
-  background: var(--accent);
-  color: white;
-  border-bottom-right-radius: 4px;
-}
-
-.bubble.assistant {
-  align-self: flex-start;
-  background: var(--bg-secondary);
-  color: var(--text-primary);
-  border-bottom-left-radius: 4px;
-  border: 1px solid var(--border-color);
-}
-
-/* Thinking Loader */
-.thinking-loader {
-  display: flex;
-  gap: 6px;
-  padding: 4px 0;
-}
-
-.loader-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--text-muted);
-  animation: bounce 1.4s infinite ease-in-out;
-}
-
-.loader-dot:nth-child(1) { animation-delay: -0.32s; }
-.loader-dot:nth-child(2) { animation-delay: -0.16s; }
-
-@keyframes bounce {
-  0%, 80%, 100% { transform: scale(0); }
-  40% { transform: scale(1); }
-}
-
-.blinking-cursor {
-  animation: blink 1s infinite;
-}
-
-@keyframes blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
-}
-
-/* Tool Blocks */
-.toolchain-block {
-  align-self: flex-start;
-  max-width: 85%;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  overflow: hidden;
-}
-
-.toolchain-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 14px;
-  cursor: pointer;
-  transition: background var(--transition-fast);
-}
-
-.toolchain-header:hover {
-  background: var(--bg-hover);
-}
-
-.tool-status-icon {
-  font-size: 0.9rem;
-}
-
-.tool-summary {
-  font-size: 0.78rem;
-  color: var(--text-secondary);
-}
-
-.tool-summary strong {
-  color: var(--accent);
-}
-
-.accordion-arrow {
-  margin-left: auto;
-  font-size: 0.7rem;
-  color: var(--text-muted);
-}
-
-.toolchain-detail {
-  padding: 0 14px 12px;
-  border-top: 1px solid var(--border-color);
-}
-
-.code-pre {
-  background: var(--bg-primary);
-  padding: 10px;
-  border-radius: 6px;
-  font-size: 0.75rem;
-  overflow-x: auto;
-  color: var(--text-secondary);
-  margin: 8px 0 0;
-}
-
-/* Permission */
-.perm-reason {
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  margin: 8px 0;
-}
-
-.perm-actions {
-  display: flex;
-  gap: 8px;
-}
-
-.perm-btn {
-  padding: 6px 16px;
-  border-radius: 6px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: var(--transition-fast);
-}
-
-.perm-btn.deny {
-  background: var(--bg-input);
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
-}
-
-.perm-btn.allow {
-  background: var(--accent);
-  border: 1px solid var(--accent);
-  color: white;
-}
-
-.perm-status {
-  font-size: 0.75rem;
-  color: var(--text-muted);
-  margin: 8px 0 0;
+/* 每条消息的外层容器 */
+.msg-item {
+  margin-bottom: 12px;
 }
 
 /* Input Section */
 .input-section {
-  padding: 10px 32px 16px;
+  padding: 16px 20px;
   border-top: 1px solid var(--border-color);
+  background: var(--bg-secondary);
 }
 
 .quick-actions {
   display: flex;
   gap: 8px;
-  margin-bottom: 10px;
-  overflow-x: auto;
-  padding-bottom: 4px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
 }
 
 .quick-btn {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-color);
-  color: var(--text-secondary);
   padding: 6px 12px;
-  border-radius: 8px;
-  font-size: 0.72rem;
+  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  font-size: 12px;
   cursor: pointer;
-  white-space: nowrap;
-  transition: var(--transition-fast);
+  transition: all 0.2s;
 }
 
 .quick-btn:hover {
@@ -619,30 +428,39 @@ onActivated(() => {
 
 .mode-switch-bar {
   display: flex;
-  gap: 0;
-  margin-bottom: 10px;
-  border-bottom: 1px solid var(--border-color);
+  gap: 4px;
+  margin-bottom: 12px;
+  background: var(--bg-body);
+  padding: 4px;
+  border-radius: 8px;
 }
 
 .mode-btn {
-  background: none;
+  flex: 1;
+  padding: 6px 12px;
   border: none;
-  border-bottom: 2px solid transparent;
-  color: var(--text-muted);
-  padding: 6px 14px 8px;
-  font-size: 0.75rem;
-  font-weight: 500;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: all 0.2s;
 }
 
 .mode-btn:hover {
-  color: var(--text-secondary);
+  background: var(--bg-hover);
 }
 
 .mode-btn.active {
-  color: var(--text-primary);
-  border-bottom-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+}
+
+.input-container {
+  display: flex;
+  gap: 8px;
 }
 
 .input-wrapper {
@@ -650,59 +468,44 @@ onActivated(() => {
   position: relative;
 }
 
-.input-container {
-  display: flex;
-  gap: 8px;
-  align-items: flex-end;
-  width: 100%;
-}
-
 .smart-textarea {
   width: 100%;
-  background: var(--bg-input);
+  padding: 10px 14px;
   border: 1px solid var(--border-input);
-  border-radius: 16px;
+  border-radius: 8px;
+  background: var(--bg-input);
   color: var(--text-primary);
-  padding: 10px 16px;
-  font-size: 0.875rem;
-  outline: none;
+  font-size: 14px;
   resize: none;
-  font-family: inherit;
-  line-height: 1.5;
-  min-height: 42px;
-  max-height: 120px;
-  transition: border-color var(--transition-fast);
+  outline: none;
+  transition: border-color 0.2s;
 }
 
 .smart-textarea:focus {
-  border-color: var(--border-focus);
+  border-color: var(--accent);
 }
 
 .smart-textarea::placeholder {
-  color: var(--text-muted);
+  color: var(--text-secondary);
 }
 
 .send-btn {
-  width: 42px;
-  height: 42px;
-  border-radius: 12px;
-  background: var(--accent);
+  padding: 10px 20px;
   border: none;
-  color: #fff;
+  border-radius: 8px;
+  background: var(--accent);
+  color: white;
+  font-size: 14px;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  transition: opacity var(--transition-fast);
+  transition: opacity 0.2s;
 }
 
-.send-btn:hover {
-  opacity: 0.85;
+.send-btn:hover:not(:disabled) {
+  opacity: 0.9;
 }
 
 .send-btn:disabled {
-  opacity: 0.25;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 </style>

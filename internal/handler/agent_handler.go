@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"strings"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
+
 
 
 
@@ -64,22 +67,26 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 	c.Writer.Header().Set("Connection", "keep-alive")
 	c.Writer.Header().Set("Transfer-Encoding", "chunked")
 
+	// 写 SSE 事件的辅助函数
+	writeSSE := func(event string, data string) {
+		fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, data)
+		c.Writer.Flush()
+	}
 
 	var fullReply strings.Builder
 	var toolMsgs []*schema.Message
 
 	go func() {
 		for ev := range toolEvents {
+			log.Printf("[SSE] tool event: type=%s name=%s requestID=%s", ev.Type, ev.Name, ev.RequestID)
 			switch ev.Type {
 			case "thinking_delta":
-				c.SSEvent("thinking_delta", gin.H{"content": ev.Content})
-				c.Writer.Flush()
+				writeSSE("thinking_delta", fmt.Sprintf(`{"content":%q}`, ev.Content))
 			case "thinking_done":
-				c.SSEvent("thinking_done", gin.H{})
-				c.Writer.Flush()
+				writeSSE("thinking_done", "{}")
 			case "tool_call":
-				c.SSEvent("tool", ev)
-				c.Writer.Flush()
+				data, _ := json.Marshal(ev)
+				writeSSE("tool", string(data))
 				toolMsgs = append(toolMsgs, &schema.Message{
 					Role: schema.Assistant,
 					ToolCalls: []schema.ToolCall{{
@@ -92,19 +99,18 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 					}},
 				})
 			case "tool_result":
-				c.SSEvent("tool", ev)
-				c.Writer.Flush()
+				data, _ := json.Marshal(ev)
+				writeSSE("tool", string(data))
 				toolMsgs = append(toolMsgs, schema.ToolMessage(ev.Result, ev.CallID, schema.WithToolName(ev.Name)))
 			default:
-				c.SSEvent("tool", ev)
-				c.Writer.Flush()
+				data, _ := json.Marshal(ev)
+				writeSSE("tool", string(data))
 			}
 		}
 	}()
 
 	defer func() {
-		c.SSEvent("done", "")
-		c.Writer.Flush()
+		writeSSE("done", `"done"`)
 	}()
 
 	for {
@@ -121,8 +127,7 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 		}
 
 		if event.Err != nil {
-			c.SSEvent("error", gin.H{"error": event.Err.Error()})
-			c.Writer.Flush()
+			writeSSE("error", fmt.Sprintf(`{"error":%q}`, event.Err.Error()))
 			return
 		}
 
@@ -132,10 +137,6 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 		}
 
 		if mv.IsStreaming && mv.MessageStream != nil {
-			// 发送 thinking 事件，告诉前端 AI 开始生成
-			c.SSEvent("thinking", gin.H{})
-			c.Writer.Flush()
-
 			for {
 				chunk, err := mv.MessageStream.Recv()
 				if err != nil {
@@ -146,15 +147,14 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 					continue
 				}
 				fullReply.WriteString(delta)
-				c.SSEvent("delta", gin.H{"content": delta})
-				c.Writer.Flush()
+				writeSSE("delta", fmt.Sprintf(`{"content":%q}`, delta))
 			}
 		} else if mv.Message != nil && mv.Message.Content != "" {
 			fullReply.WriteString(mv.Message.Content)
-			c.SSEvent("message", gin.H{"content": mv.Message.Content})
-			c.Writer.Flush()
+			writeSSE("message", fmt.Sprintf(`{"content":%q}`, mv.Message.Content))
 		}
 	}
+
 
 
 	// 持久化对话

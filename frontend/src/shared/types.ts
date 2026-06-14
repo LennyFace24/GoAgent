@@ -82,11 +82,24 @@ export interface ApiMessage {
   tool_name?: string
 }
 
-// AI 回复分组（一轮完整回复）
-export interface MessageGroup {
+// AI 响应内容（一轮 AI 回复中的所有非用户消息）
+export interface AiResponse {
   thinking: ThinkingMessage | null
   toolCalls: ToolCallMessage[]
   toolResults: ToolResultMessage[]
   reply: ChatMessage | null
 }
 
+// 对话轮次：一条用户消息 + AI 的完整响应
+export interface ChatTurn {
+  userMessage: ChatMessage | null   // null 仅用于初始欢迎消息
+  aiResponse: AiResponse
+}
+
+// 旧的 MessageGroup 保留兼容（内部可迁移到 ChatTurn）
+export interface MessageGroup {
+  thinking: ThinkingMessage | null
+  toolCalls: ToolCallMessage[]
+  toolResults: ToolResultMessage[]
+  reply: ChatMessage | null
+}
