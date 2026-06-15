@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"time"
+
 
 	cfg "github.com/LennyFace24/MiniAgent/internal/config"
 	ctxmgr "github.com/LennyFace24/MiniAgent/internal/context"
@@ -182,16 +184,25 @@ func (s *AgentService) runLoop(
 		streams := stream.Copy(2)
 		gen.Send(adk.EventFromMessage(nil, streams[0], schema.Assistant, ""))
 
-		// 读取 streams[1] 收集 tool calls（流式累积，按位置合并分片的 arguments）
+		// 读取 streams[1] 收集 tool calls 和 thinking 内容
 		var toolCalls []schema.ToolCall
+		var thinkingBuilder strings.Builder
 		for {
 			chunk, err := streams[1].Recv()
 			if err != nil {
 				break
 			}
+			// 提取 thinking 内容
+			if chunk.ReasoningContent != "" {
+				thinkingBuilder.WriteString(chunk.ReasoningContent)
+				toolEvents <- ToolEvent{
+					Type:    "thinking_delta",
+					Content: chunk.ReasoningContent,
+				}
+			}
+			// 收集 tool calls
 			for i, tc := range chunk.ToolCalls {
 				if i < len(toolCalls) {
-					// 同位置的 tool call，追加 arguments
 					toolCalls[i].Function.Arguments += tc.Function.Arguments
 					if tc.Function.Name != "" {
 						toolCalls[i].Function.Name = tc.Function.Name
@@ -200,11 +211,17 @@ func (s *AgentService) runLoop(
 						toolCalls[i].ID = tc.ID
 					}
 				} else {
-					// 新的 tool call
 					toolCalls = append(toolCalls, tc)
 				}
 			}
 		}
+		thinkingContent := thinkingBuilder.String()
+
+		// 发送 thinking 结束信号
+		if thinkingContent != "" {
+			toolEvents <- ToolEvent{Type: "thinking_done"}
+		}
+
 
 
 
@@ -331,9 +348,6 @@ func (s *AgentService) runLoop(
 		}
 		turn++
 	}
-
-	// // 达到最大轮次，强制最后一轮直接回答
-	// messages = append(messages, schema.UserMessage("你已调用足够多次工具，现在必须直接回答用户的问题。不要再调用任何工具。"))
 	stream, err := s.toolModel.Stream(ctx, messages)
 	if err != nil {
 		gen.Send(&adk.AgentEvent{Err: err})

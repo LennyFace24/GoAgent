@@ -5,9 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	basictool "github.com/LennyFace24/MiniAgent/internal/tools/basic_tool"
+	"github.com/LennyFace24/MiniAgent/internal/util"
 )
 
 
@@ -180,7 +182,7 @@ func (pm *PermissionManager) Check(toolName string, toolInput map[string]any) De
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 
-	// Step 0: Bash 安全校验（在 deny 规则之前）
+	// Step 0: Bash 安全校验和复合命令拆分
 	if toolName == "bash" {
 		cmd, _ := toolInput["command"].(string)
 		vr := basictool.ValidateBash(cmd)
@@ -197,6 +199,12 @@ func (pm *PermissionManager) Check(toolName string, toolInput map[string]any) De
 				Reason:   fmt.Sprintf("Bash 安全校验标记: %v", vr.Failures),
 			}
 		}
+
+		// 复合命令拆分：|, ||, &&, ;
+		subCommands := splitBashCommand(cmd)
+		if len(subCommands) > 1 {
+			return pm.checkSubCommands(subCommands, toolInput)
+		}
 	}
 
 	// Step 1: Deny 规则（不可绕过）
@@ -212,16 +220,16 @@ func (pm *PermissionManager) Check(toolName string, toolInput map[string]any) De
 		}
 	}
 
-	// Step 2: Bash 只读判定
+	// Step 2: Bash AST 分析（自动判断读写）
 	if toolName == "bash" {
 		cmd, _ := toolInput["command"].(string)
-		if IsBashReadOnly(cmd) {
+		access := util.AnalyzeBashCommand(cmd)
+		if access == util.BashAccessRead {
 			return Decision{
 				Behavior: BehaviorAllow,
-				Reason:   "Bash 只读命令，自动放行",
+				Reason:   "AST 分析: 只读命令，自动放行",
 			}
 		}
-		// 非只读 → 继续走模式检查 → allow 规则 → ask
 	}
 
 	// Step 3: 模式检查
@@ -248,6 +256,7 @@ func (pm *PermissionManager) Check(toolName string, toolInput map[string]any) De
 		// 写操作继续走 allow 规则 → ask
 	}
 
+
 	// Step 3: Allow 规则
 	for _, rule := range pm.rules {
 		if rule.Behavior != BehaviorAllow {
@@ -255,6 +264,147 @@ func (pm *PermissionManager) Check(toolName string, toolInput map[string]any) De
 		}
 		if pm.matches(rule, toolName, toolInput) {
 			pm.consecutiveDenials = 0
+			return Decision{
+				Behavior: BehaviorAllow,
+				Reason:   fmt.Sprintf("命中放行规则: tool=%s", rule.Tool),
+			}
+		}
+	}
+
+
+	// Step 4: 交给用户确认
+	return Decision{
+		Behavior: "ask",
+		Reason:   fmt.Sprintf("无规则匹配 %s，需要用户确认", toolName),
+	}
+}
+
+// ---------- 复合命令处理 ----------
+
+
+// splitBashCommand 拆分复合命令为单个命令
+// 支持: |, ||, &&, ;
+func splitBashCommand(cmd string) []string {
+	// 简单拆分，不处理引号内的分隔符
+	var parts []string
+	current := ""
+	i := 0
+	for i < len(cmd) {
+		if i+1 < len(cmd) && cmd[i:i+2] == "||" {
+			if current != "" {
+				parts = append(parts, current)
+			}
+			current = ""
+			i += 2
+		} else if i+1 < len(cmd) && cmd[i:i+2] == "&&" {
+			if current != "" {
+				parts = append(parts, current)
+			}
+			current = ""
+			i += 2
+		} else if cmd[i] == '|' || cmd[i] == ';' {
+			if current != "" {
+				parts = append(parts, current)
+			}
+			current = ""
+			i++
+		} else {
+			current += string(cmd[i])
+			i++
+		}
+	}
+	if current != "" {
+		parts = append(parts, current)
+	}
+	// trim 空格
+	for i, p := range parts {
+		parts[i] = strings.TrimSpace(p)
+	}
+	return parts
+}
+
+// checkSubCommands 检查拆分后的子命令
+func (pm *PermissionManager) checkSubCommands(subCommands []string, toolInput map[string]any) Decision {
+	// 统计各子命令的决策
+	hasDeny := false
+	hasAsk := false
+	denyReason := ""
+	askReason := ""
+
+	for _, subCmd := range subCommands {
+		if subCmd == "" {
+			continue
+		}
+		// 构造子命令的 toolInput
+		subInput := make(map[string]any)
+		for k, v := range toolInput {
+			subInput[k] = v
+		}
+		subInput["command"] = subCmd
+
+		// 检查子命令
+		decision := pm.checkSingleCommand("bash", subInput)
+		switch decision.Behavior {
+		case BehaviorDeny:
+			hasDeny = true
+			denyReason = decision.Reason
+		case "ask":
+			hasAsk = true
+			askReason = decision.Reason
+		}
+	}
+
+	// 决策优先级：deny > ask > allow
+	if hasDeny {
+		return Decision{
+			Behavior: BehaviorDeny,
+			Reason:   fmt.Sprintf("子命令被拒绝: %s", denyReason),
+		}
+	}
+	if hasAsk {
+		return Decision{
+			Behavior: "ask",
+			Reason:   fmt.Sprintf("子命令需要确认: %s", askReason),
+		}
+	}
+	return Decision{
+		Behavior: BehaviorAllow,
+		Reason:   "所有子命令均放行",
+	}
+}
+
+// checkSingleCommand 检查单个命令（不含复合命令拆分）
+func (pm *PermissionManager) checkSingleCommand(toolName string, toolInput map[string]any) Decision {
+	// Step 1: Deny 规则
+	for _, rule := range pm.rules {
+		if rule.Behavior != BehaviorDeny {
+			continue
+		}
+		if pm.matches(rule, toolName, toolInput) {
+			return Decision{
+				Behavior: BehaviorDeny,
+				Reason:   fmt.Sprintf("命中拒绝规则: tool=%s", rule.Tool),
+			}
+		}
+	}
+
+	// Step 2: Bash 只读判定
+	if toolName == "bash" {
+		cmd, _ := toolInput["command"].(string)
+		if IsBashReadOnly(cmd) {
+			return Decision{
+				Behavior: BehaviorAllow,
+				Reason:   "Bash 只读命令，自动放行",
+			}
+		}
+	}
+
+	// Step 3: Allow 规则
+	for _, rule := range pm.rules {
+		if rule.Behavior != BehaviorAllow {
+			continue
+		}
+		if pm.matches(rule, toolName, toolInput) {
 			return Decision{
 				Behavior: BehaviorAllow,
 				Reason:   fmt.Sprintf("命中放行规则: tool=%s", rule.Tool),
@@ -286,11 +436,24 @@ func (pm *PermissionManager) matches(rule Rule, toolName string, toolInput map[s
 	// 内容 glob 匹配（bash command）
 	if rule.Content != "" && rule.Content != "*" {
 		cmd, _ := toolInput["command"].(string)
-		if matched, _ := filepath.Match(rule.Content, cmd); !matched {
-			return false
+		// 先尝试精确匹配
+		if cmd == rule.Content {
+			return true
 		}
+		if matched, _ := filepath.Match(rule.Content, cmd); matched {
+			return true
+		}
+		// 前缀匹配：rule.Content="dir *" 应匹配 "dir" 和 "dir /path"
+		if strings.HasSuffix(rule.Content, " *") {
+			prefix := strings.TrimSuffix(rule.Content, " *")
+			if cmd == prefix || strings.HasPrefix(cmd, prefix+" ") {
+				return true
+			}
+		}
+		return false
 	}
 	return true
+
 }
 
 // ---------- 拒绝计数 / 熔断器 ----------

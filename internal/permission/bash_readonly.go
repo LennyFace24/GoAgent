@@ -411,6 +411,9 @@ var readonlyRegexes = []*regexp.Regexp{
 
 	// ls（允许常规参数）
 	regexp.MustCompile(`^ls(?:\s+[^<>()\x60$|{}&;\n\r]*)?$`),
+	// dir（Windows 常用，类似 ls）
+	regexp.MustCompile(`^dir(?:\s+[^<>()\x60$|{}&;\n\r]*)?$`),
+
 
 	// cd（允许引号路径）
 	regexp.MustCompile(`^cd(?:\s+(?:'[^']*'|"[^"]*"|[^\s;|&\x60$(){}><#\\]+))?$`),

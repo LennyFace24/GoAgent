@@ -33,16 +33,17 @@ export function useChat(options: UseChatOptions) {
     const abortCtrl = new AbortController()
     activeAbort = abortCtrl
     try {
-      // 直连后端，绕过 Vite 代理（Vite 代理不支持 SSE chunked 编码）
-      const base = import.meta.env.VITE_API_URL
-        || (import.meta.env.DEV ? 'http://127.0.0.1:8080' : window.location.origin)
+      // 使用相对路径，通过 Vite 代理访问后端
+      const base = ''
       const endpoint = chatMode.value === 'chat' ? '/api/chat_stream' : '/api/ai_ops'
       const res = await fetch(base + endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ message: text, conversation_id: conversationId.value }),
         signal: abortCtrl.signal,
       })
+
 
 
 
@@ -249,12 +250,14 @@ export function useChat(options: UseChatOptions) {
     msg.responded = true
     msg.approved = approved
     try {
-      const base = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://127.0.0.1:8080' : window.location.origin)
-      await fetch(base + '/api/permission/response', {
+      await fetch('/api/permission/response', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ id: msg.requestId, approved, always }),
       })
+
+
     } catch { /* ignore */ }
   }
 
@@ -272,8 +275,11 @@ export function useChat(options: UseChatOptions) {
     messages.value = []
 
     try {
-      const base = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://127.0.0.1:8080' : window.location.origin)
-      const res = await fetch(`${base}/api/conversation/${conversationId.value}`)
+      const res = await fetch(`/api/conversation/${conversationId.value}`, {
+        credentials: 'include',
+      })
+
+
       if (!res.ok) {
         messages.value.push({ id: Date.now(), role: 'assistant', content: defaultMessage })
         return

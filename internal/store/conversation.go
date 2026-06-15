@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+	"log"
 
 	"github.com/cloudwego/eino/schema"
 )
@@ -139,7 +140,7 @@ func (s *ConversationStore) LoadHistory(sessionID, conversationID string) ([]*sc
 		var line messageLine
 		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
 			continue
-		}
+		};
 		switch line.Role {
 		case "user":
 			msgs = append(msgs, schema.UserMessage(line.Content))
@@ -160,6 +161,7 @@ func (s *ConversationStore) LoadHistory(sessionID, conversationID string) ([]*sc
 			msgs = append(msgs, schema.ToolMessage(line.Content, line.ToolCallID, schema.WithToolName(line.ToolName)))
 		}
 	}
+	log.Printf("加载对话历史：会话 %s, 对话 %s, 消息数 %d", sessionID, conversationID, len(msgs))
 	return msgs, scanner.Err()
 }
 

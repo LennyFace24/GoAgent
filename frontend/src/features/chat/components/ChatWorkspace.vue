@@ -132,8 +132,11 @@ function executeCommand(name: string): void {
 
 async function showContextStatus() {
   try {
-    const base = import.meta.env.VITE_API_URL || (import.meta.env.DEV ? 'http://127.0.0.1:8080' : window.location.origin)
-    const res = await fetch(`${base}/api/context/status`)
+    const res = await fetch('/api/context/status', {
+      credentials: 'include',
+    })
+
+
     if (res.ok) {
       const data = await res.json()
       messages.value.push({

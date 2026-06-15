@@ -3,6 +3,8 @@ package handler
 import (
 	"net/http"
 
+	"log"
+
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -28,7 +30,7 @@ func (h *ConversationHandler) GetConversations(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取对话列表失败"})
 		return
 	}
-
+	log.Printf("会话 %s 的对话列表: %+v", sessionID, conversations)
 	c.JSON(http.StatusOK, gin.H{"conversations": conversations})
 }
 
@@ -73,7 +75,7 @@ func (h *ConversationHandler) GetConversation(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "读取对话历史失败"})
 		return
 	}
-
+	log.Printf("会话 %s 的消息记录是：%+v", sessionID, messages)
 	c.JSON(http.StatusOK, gin.H{"messages": messages})
 }
 

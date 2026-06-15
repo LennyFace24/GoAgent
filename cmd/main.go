@@ -25,8 +25,14 @@ func main() {
 
 
 	store := cookie.NewStore([]byte("session-secret"))
+	store.Options(sessions.Options{
+		Path:     "/",
+		MaxAge:   86400 * 7, // 7 天
+		SameSite: 0,         // Lax 模式
+	})
 	r.Use(sessions.Sessions("goagent_session", store))
 	r.Use(middleware.SessionIDMiddleware())
+
 
 	handler.SetupHandler(r)
 	handler.SetupRoutes(r)
