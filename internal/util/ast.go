@@ -144,22 +144,6 @@ func analyzeRedirect(node *sitter.Node, source string) BashAccessType {
 	return BashAccessRead
 }
 
-// analyzeCommand 分析命令节点
-func analyzeCommand(node *sitter.Node, source string) BashAccessType {
-	// 提取命令名
-	cmdName := extractCommandName(node, source)
-	if cmdName == "" {
-		return BashAccessUnknown
-	}
-
-	// 检查是否有重定向
-	if hasRedirect(node) {
-		return BashAccessWrite
-	}
-
-	// 分类命令
-	return classifyCommand(cmdName)
-}
 
 // extractCommandName 从命令节点提取命令名
 func extractCommandName(node *sitter.Node, source string) string {
@@ -174,6 +158,64 @@ func extractCommandName(node *sitter.Node, source string) string {
 		}
 	}
 	return ""
+}
+
+// extractCommandArgs 从命令节点提取参数列表
+func extractCommandArgs(node *sitter.Node, source string) []string {
+	var args []string
+	foundName := false
+	for i := 0; i < int(node.ChildCount()); i++ {
+		child := node.Child(i)
+		if child.Type() == "command_name" || child.Type() == "word" {
+			if !foundName {
+				foundName = true
+				continue
+			}
+		}
+		if child.Type() == "word" || child.Type() == "string" || child.Type() == "raw_string" {
+			args = append(args, nodeContent(child, source))
+		}
+	}
+	return args
+}
+
+// analyzeCommand 分析命令节点
+func analyzeCommand(node *sitter.Node, source string) BashAccessType {
+	// 提取命令名
+	cmdName := extractCommandName(node, source)
+	if cmdName == "" {
+		return BashAccessUnknown
+	}
+
+	// 检查是否有重定向
+	if hasRedirect(node) {
+		return BashAccessWrite
+	}
+
+	// 特殊处理 bash 命令：如果参数是数字，自动放行
+	if cmdName == "bash" || cmdName == "sh" || cmdName == "zsh" || cmdName == "dash" {
+		args := extractCommandArgs(node, source)
+		if len(args) > 0 && isNumeric(args[0]) {
+			return BashAccessRead
+		}
+	}
+
+	// 分类命令
+	return classifyCommand(cmdName)
+}
+
+
+// isNumeric 检查字符串是否是纯数字
+func isNumeric(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // hasRedirect 检查节点是否有重定向

@@ -180,24 +180,30 @@ func (s *AgentService) runLoop(
 			return
 		}
 
-		// 流式发送给前端（streams[0]），同时本地收集 tool calls（streams[1]）
-		streams := stream.Copy(2)
-		gen.Send(adk.EventFromMessage(nil, streams[0], schema.Assistant, ""))
-
-		// 读取 streams[1] 收集 tool calls 和 thinking 内容
+		// 读取 stream，统一处理 thinking 和 reply 内容
 		var toolCalls []schema.ToolCall
 		var thinkingBuilder strings.Builder
+		var replyBuilder strings.Builder
+
 		for {
-			chunk, err := streams[1].Recv()
+			chunk, err := stream.Recv()
 			if err != nil {
 				break
 			}
-			// 提取 thinking 内容
+			// thinking 内容
 			if chunk.ReasoningContent != "" {
 				thinkingBuilder.WriteString(chunk.ReasoningContent)
 				toolEvents <- ToolEvent{
 					Type:    "thinking_delta",
 					Content: chunk.ReasoningContent,
+				}
+			}
+			// reply 内容
+			if chunk.Content != "" {
+				replyBuilder.WriteString(chunk.Content)
+				toolEvents <- ToolEvent{
+					Type:    "delta",
+					Content: chunk.Content,
 				}
 			}
 			// 收集 tool calls
@@ -216,11 +222,17 @@ func (s *AgentService) runLoop(
 			}
 		}
 		thinkingContent := thinkingBuilder.String()
+		replyContent := replyBuilder.String()
 
 		// 发送 thinking 结束信号
 		if thinkingContent != "" {
 			toolEvents <- ToolEvent{Type: "thinking_done"}
 		}
+
+		// 发送 reply 到 handler 用于持久化
+		replyMsg := schema.AssistantMessage(replyContent, nil)
+		gen.Send(adk.EventFromMessage(replyMsg, nil, schema.Assistant, ""))
+
 
 
 

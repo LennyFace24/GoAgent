@@ -1,5 +1,5 @@
 ﻿<script setup lang="ts">
-import { ref } from 'vue'
+import { ref,onMounted } from 'vue'
 import SlimSidebar from './features/conversation/components/SlimSidebar.vue'
 import SubSidebar from './features/conversation/components/SubSidebar.vue'
 import ChatWorkspace from './features/chat/components/ChatWorkspace.vue'
@@ -23,6 +23,15 @@ function onCreated(id: string): void {
 function onDashboardViewChange(view: string): void {
   dashboardView.value = view
 }
+
+onMounted(async () => {
+  const { init } = useConversations()
+  const id = await init();
+  if (id) {
+    activeConversationId.value = id
+  }
+})
+
 </script>
 
 <template>

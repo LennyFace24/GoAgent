@@ -84,6 +84,8 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 				writeSSE("thinking_delta", fmt.Sprintf(`{"content":%q}`, ev.Content))
 			case "thinking_done":
 				writeSSE("thinking_done", "{}")
+			case "delta":
+				writeSSE("delta", fmt.Sprintf(`{"content":%q}`, ev.Content))
 			case "tool_call":
 				data, _ := json.Marshal(ev)
 				writeSSE("tool", string(data))
@@ -106,6 +108,7 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 				data, _ := json.Marshal(ev)
 				writeSSE("tool", string(data))
 			}
+
 		}
 	}()
 
@@ -137,22 +140,22 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 		}
 
 		if mv.IsStreaming && mv.MessageStream != nil {
+			// delta 事件已由 runLoop 通过 toolEvents 发送，这里只收集内容用于持久化
 			for {
 				chunk, err := mv.MessageStream.Recv()
 				if err != nil {
 					break
 				}
-				delta := chunk.Content
-				if delta == "" {
-					continue
+				if chunk.Content != "" {
+					fullReply.WriteString(chunk.Content)
 				}
-				fullReply.WriteString(delta)
-				writeSSE("delta", fmt.Sprintf(`{"content":%q}`, delta))
 			}
 		} else if mv.Message != nil && mv.Message.Content != "" {
 			fullReply.WriteString(mv.Message.Content)
+			// 非流式消息仍需发送
 			writeSSE("message", fmt.Sprintf(`{"content":%q}`, mv.Message.Content))
 		}
+
 	}
 
 

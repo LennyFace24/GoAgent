@@ -4,6 +4,10 @@ import type { Conversation } from '../types'
 export function useConversations() {
   const conversations = ref<Conversation[]>([])
 
+  async function init(): Promise<string | null> {
+    const id = await create();
+    return id
+  }
   async function load(): Promise<void> {
     try {
       const res = await fetch('/api/conversations')

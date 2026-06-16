@@ -114,8 +114,13 @@ export function useChat(options: UseChatOptions) {
         }
 
         if (!eventData) continue
+        // done 事件：结束流
+        if (eventData === '"done"' || eventData === 'done') {
+          return
+        }
         console.log('[useChat] SSE:', eventType, eventData.slice(0, 80))
         handleSSEEvent(eventType, eventData)
+
       }
     }
   }
