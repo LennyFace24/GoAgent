@@ -63,4 +63,7 @@ func TestConfigDefaultsContextWindowWhenMissing(t *testing.T) {
 	if got := cfg.ContextBudgetTokens(); got != int64(DefaultContextWindow) {
 		t.Fatalf("ContextBudgetTokens() = %d, want %d", got, DefaultContextWindow)
 	}
+	if cfg.Workspace.Root != "../GoAgent-workspace" {
+		t.Fatalf("Workspace.Root = %q, want %q", cfg.Workspace.Root, "../GoAgent-workspace")
+	}
 }

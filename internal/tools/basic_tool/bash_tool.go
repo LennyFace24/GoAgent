@@ -109,10 +109,10 @@ func auditBash(command string, exitErr error) {
 		time.Now().Format("2006-01-02 15:04:05"), status, command)
 }
 
-func NewBashTool() (tool.InvokableTool, error) {
+func NewBashTool(workspaceRoot string) (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"bash",
-		"在服务器上执行 bash 命令并返回输出。用于查看系统状态、进程、日志、网络连接等。受危险命令拦截、输出大小、超时限制保护。",
+		"在服务器上执行 bash 命令并返回输出。命令默认在 agent 工作区执行；如需查看源码，请显式使用源码路径。受危险命令拦截、输出大小、超时限制保护。",
 		func(ctx context.Context, input BashInput) (string, error) {
 			if strings.TrimSpace(input.Command) == "" {
 				return "错误: 命令为空", nil
@@ -135,6 +135,13 @@ func NewBashTool() (tool.InvokableTool, error) {
 			defer cancel()
 
 			cmd := exec.CommandContext(execCtx, "sh", "-c", input.Command)
+			if workspaceRoot != "" {
+				workdir := filepath.Clean(workspaceRoot)
+				if err := os.MkdirAll(workdir, 0755); err != nil {
+					return fmt.Sprintf("错误: 创建工作区失败 %v", err), nil
+				}
+				cmd.Dir = workdir
+			}
 			output, err := cmd.CombinedOutput()
 
 			auditBash(input.Command, err)

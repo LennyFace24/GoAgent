@@ -51,16 +51,24 @@ func IsPathSafe(path string) error {
 	return nil
 }
 
-func NewReadFileTool() (tool.InvokableTool, error) {
+func resolveWorkspacePath(workspaceRoot, path string) string {
+	if filepath.IsAbs(path) || workspaceRoot == "" {
+		return filepath.Clean(path)
+	}
+	return filepath.Clean(filepath.Join(workspaceRoot, path))
+}
+
+func NewReadFileTool(workspaceRoot string) (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"read_file",
-		"读取本地文件内容。支持按行偏移和数量限制读取。返回带行号的文本。",
+		"读取本地文件内容。相对路径默认从 agent 工作区读取；如需查看源码，可传入源码文件的绝对路径。支持按行偏移和数量限制读取。",
 		func(ctx context.Context, input ReadFileInput) (string, error) {
-			if err := IsPathSafe(input.Path); err != nil {
+			path := resolveWorkspacePath(workspaceRoot, input.Path)
+			if err := IsPathSafe(path); err != nil {
 				return fmt.Sprintf("错误: %v", err), nil
 			}
 
-			info, err := os.Stat(input.Path)
+			info, err := os.Stat(path)
 			if err != nil {
 				return fmt.Sprintf("错误: %v", err), nil
 			}
@@ -71,7 +79,7 @@ func NewReadFileTool() (tool.InvokableTool, error) {
 				return fmt.Sprintf("错误: 文件过大 (%d 字节)，超过限制", info.Size()), nil
 			}
 
-			f, err := os.Open(input.Path)
+			f, err := os.Open(path)
 			if err != nil {
 				return fmt.Sprintf("错误: %v", err), nil
 			}
@@ -127,39 +135,41 @@ func NewReadFileTool() (tool.InvokableTool, error) {
 	)
 }
 
-func NewWriteFileTool() (tool.InvokableTool, error) {
+func NewWriteFileTool(workspaceRoot string) (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"write_file",
-		"创建或完全覆盖一个文件。如果文件已存在，原内容会被覆盖。优先使用 edit_file 修改现有文件。",
+		"创建或完全覆盖一个文件。相对路径默认写入 agent 工作区；如需写源码，请显式传入绝对路径。优先使用 edit_file 修改现有文件。",
 		func(ctx context.Context, input WriteFileInput) (string, error) {
-			if err := IsPathSafe(input.Path); err != nil {
+			path := resolveWorkspacePath(workspaceRoot, input.Path)
+			if err := IsPathSafe(path); err != nil {
 				return fmt.Sprintf("错误: %v", err), nil
 			}
 			if len(input.Content) > maxFileWriteBytes {
 				return fmt.Sprintf("错误: 内容过大 (%d 字节)，超过限制", len(input.Content)), nil
 			}
 
-			if dir := filepath.Dir(input.Path); dir != "" {
+			if dir := filepath.Dir(path); dir != "" {
 				if err := os.MkdirAll(dir, 0755); err != nil {
 					return fmt.Sprintf("错误: 创建目录失败 %v", err), nil
 				}
 			}
 
-			if err := os.WriteFile(input.Path, []byte(input.Content), 0644); err != nil {
+			if err := os.WriteFile(path, []byte(input.Content), 0644); err != nil {
 				return fmt.Sprintf("错误: 写入失败 %v", err), nil
 			}
 
-			return fmt.Sprintf("已写入 %s (%d 字节)", input.Path, len(input.Content)), nil
+			return fmt.Sprintf("已写入 %s (%d 字节)", path, len(input.Content)), nil
 		},
 	)
 }
 
-func NewEditFileTool() (tool.InvokableTool, error) {
+func NewEditFileTool(workspaceRoot string) (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"edit_file",
-		"在已有文件中精确替换文本。old_text 必须在文件中唯一出现一次，否则会报错。",
+		"在已有文件中精确替换文本。相对路径默认定位到 agent 工作区；如需编辑源码，请显式传入绝对路径。old_text 必须在文件中唯一出现一次，否则会报错。",
 		func(ctx context.Context, input EditFileInput) (string, error) {
-			if err := IsPathSafe(input.Path); err != nil {
+			path := resolveWorkspacePath(workspaceRoot, input.Path)
+			if err := IsPathSafe(path); err != nil {
 				return fmt.Sprintf("错误: %v", err), nil
 			}
 			if input.OldText == "" {
@@ -169,7 +179,7 @@ func NewEditFileTool() (tool.InvokableTool, error) {
 				return "错误: old_text 与 new_text 相同，无需修改", nil
 			}
 
-			data, err := os.ReadFile(input.Path)
+			data, err := os.ReadFile(path)
 			if err != nil {
 				return fmt.Sprintf("错误: 读取文件失败 %v", err), nil
 			}
@@ -185,11 +195,11 @@ func NewEditFileTool() (tool.InvokableTool, error) {
 
 			newContent := strings.Replace(content, input.OldText, input.NewText, 1)
 
-			if err := os.WriteFile(input.Path, []byte(newContent), 0644); err != nil {
+			if err := os.WriteFile(path, []byte(newContent), 0644); err != nil {
 				return fmt.Sprintf("错误: 写入失败 %v", err), nil
 			}
 
-			return fmt.Sprintf("已修改 %s", input.Path), nil
+			return fmt.Sprintf("已修改 %s", path), nil
 		},
 	)
 }

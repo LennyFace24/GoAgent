@@ -309,7 +309,7 @@ func (s *AgentService) runLoop(
 				}
 
 				select {
-				case approved := <-permission.WaitForDecision(reqID):
+				case approved := <-permission.WaitForDecision(reqID, sessionID, conversationID):
 					if approved {
 						result, _ = s.executeTool(ctx, tc)
 						s.perms.ResetDenials()

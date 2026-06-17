@@ -34,6 +34,12 @@ type Config struct {
 	ChromaDB struct {
 		URL string `yaml:"url"`
 	} `yaml:"chromadb"`
+	Session struct {
+		SecretKey string `yaml:"secret_key"`
+	} `yaml:"session"`
+	Workspace struct {
+		Root string `yaml:"root"`
+	} `yaml:"workspace"`
 }
 
 const DefaultContextWindow = 200_000
@@ -50,6 +56,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Llm.SafetyMarginTokens < 0 {
 		c.Llm.SafetyMarginTokens = 0
+	}
+	if c.Workspace.Root == "" {
+		c.Workspace.Root = "../GoAgent-workspace"
 	}
 }
 

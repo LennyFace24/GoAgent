@@ -171,19 +171,39 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 // PermissionResponse 处理前端的权限确认响应
 func (h *AgentHandler) PermissionResponse(c *gin.Context) {
 	var req struct {
-		ID       string `json:"id"`
-		Approved bool   `json:"approved"`
-		Always   bool   `json:"always"`
+		ID             string `json:"id"`
+		ConversationID string `json:"conversation_id"`
+		Approved       bool   `json:"approved"`
+		Always         bool   `json:"always"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
 		return
 	}
 
-	permission.HandleResponse(req.ID, req.Approved)
+	if req.ID == "" {
+		c.JSON(400, gin.H{"error": "id is required"})
+		return
+	}
+
+	sessionID, ok := sessions.Default(c).Get("session_id").(string)
+	if !ok || sessionID == "" {
+		c.JSON(401, gin.H{"error": "session is required"})
+		return
+	}
+
+	conversationID := req.ConversationID
+	if conversationID == "" {
+		conversationID = "default"
+	}
+
+	if !permission.HandleResponse(req.ID, sessionID, conversationID, req.Approved) {
+		c.JSON(404, gin.H{"error": "permission request not found"})
+		return
+	}
 
 	if req.Always && req.Approved {
-		log.Printf("PermissionResponse: 用户选择始终允许 request=%s", req.ID)
+		log.Printf("PermissionResponse: 鐢ㄦ埛閫夋嫨濮嬬粓鍏佽 request=%s", req.ID)
 	}
 
 	c.JSON(200, gin.H{"ok": true})

@@ -14,3 +14,5 @@ embedding:
     model: your-embedding-model
 chromadb:
     url: http://chromadb:8088
+session:
+    secret_key: session-secret

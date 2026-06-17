@@ -33,11 +33,16 @@ func runSubAggent(ctx context.Context, content SubProxyInput) string {
 		return fmt.Sprintf("Error creating subagent: %v", err)
 	}
 
+	workspaceRoot := ""
+	if cfg != nil {
+		workspaceRoot = cfg.Workspace.Root
+	}
+
 	tools_ := []tool.BaseTool{
-		util.Must(basictool.NewBashTool()),
-		util.Must(basictool.NewReadFileTool()),
-		util.Must(basictool.NewEditFileTool()),
-		util.Must(basictool.NewWriteFileTool()),
+		util.Must(basictool.NewBashTool(workspaceRoot)),
+		util.Must(basictool.NewReadFileTool(workspaceRoot)),
+		util.Must(basictool.NewEditFileTool(workspaceRoot)),
+		util.Must(basictool.NewWriteFileTool(workspaceRoot)),
 	}
 
 	toolInfos := make([]*schema.ToolInfo, len(tools_))

@@ -1,0 +1,11 @@
+{
+  "id": 1,
+  "TaskPayload": {
+    "subject": "改进 agent_handler.go 流式响应错误处理",
+    "description": "改进 agent_handler.go 文件中的错误处理，确保：1. 记录完整的错误上下文，包括思考/推理过程；2. 错误响应包含有用的调试信息；3. 即使发生错误也要维护对话状态。",
+    "status": "in_progress",
+    "block_by": [],
+    "blocking": [],
+    "owner": "MiniAgent"
+  }
+}

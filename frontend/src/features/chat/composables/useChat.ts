@@ -259,7 +259,7 @@ export function useChat(options: UseChatOptions) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ id: msg.requestId, approved, always }),
+        body: JSON.stringify({ id: msg.requestId, conversation_id: conversationId.value, approved, always }),
       })
 
 

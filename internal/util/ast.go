@@ -2,6 +2,9 @@ package util
 
 import (
 	"strings"
+	"sync"
+	"context"
+	"log"
 
 	sitter "github.com/smacker/go-tree-sitter"
 	"github.com/smacker/go-tree-sitter/bash"
@@ -77,6 +80,18 @@ var gitWriteSubcommands = map[string]bool{
 	"cherry-pick": true, "revert": true, "clean": true, "rm": true,
 }
 
+// 1. 声明一个全局的对象池，专门用来复用重型的 Parser 对象
+var parserPool = sync.Pool{
+	New: func() interface{} {
+		p := sitter.NewParser()
+		if p != nil {
+			// 在创建时就绑定好语言，避免后续重复绑定
+			p.SetLanguage(bash.GetLanguage())
+		}
+		return p
+	},
+}
+
 // AnalyzeBashCommand 使用 tree-sitter AST 分析 bash 命令的访问类型
 func AnalyzeBashCommand(cmd string) BashAccessType {
 	cmd = strings.TrimSpace(cmd)
@@ -84,20 +99,40 @@ func AnalyzeBashCommand(cmd string) BashAccessType {
 		return BashAccessUnknown
 	}
 
-	// 解析为 AST
-	parser := sitter.NewParser()
-	parser.SetLanguage(bash.GetLanguage())
-	tree, err := parser.ParseCtx(nil, nil, []byte(cmd))
-	if err != nil {
+	// 使用 defer + recover 捕获所有 panic（保留你原本的安全兜底）
+	defer func() {
+		if r := recover(); r != nil {
+			// 打印日志
+			log.Printf("[FATAL] Tree-sitter panicked during parsing: %v", r)
+		}
+	}()
+
+	// 2. 从对象池中获取一个现成的 Parser，无 CGO 新建开销
+	p := parserPool.Get()
+	if p == nil {
 		return analyzeFallback(cmd)
 	}
+	parser := p.(*sitter.Parser)
+	
+	// 3. 核心安全修复：使用 defer 确保无论函数从哪个分支返回，Parser 都会被稳妥放回池中
+	// 由于 Parser 在池中存活，其底层的 C 内存会一直复用，彻底终结了单次调用泄露的问题
+	defer parserPool.Put(parser)
+
+	// 4. 使用标准的 ParseCtx 进行解析
+	tree, err := parser.ParseCtx(context.Background(), nil, []byte(cmd))
+	if err != nil || tree == nil {
+		return analyzeFallback(cmd)
+	}
+	// 5. Tree 对象同样是 CGO 对象，必须显式 Close 释放它单次生成的 AST 树内存
 	defer tree.Close()
 
 	root := tree.RootNode()
+	if root == nil {
+		return analyzeFallback(cmd)
+	}
 
 	// 遍历 AST 分析
-	access := analyzeNode(root, cmd)
-	return access
+	return analyzeNode(root, cmd)
 }
 
 // analyzeNode 递归分析 AST 节点
@@ -144,39 +179,82 @@ func analyzeRedirect(node *sitter.Node, source string) BashAccessType {
 	return BashAccessRead
 }
 
+// cleanCommandName 清理命令名，去除首尾的引号
+func cleanCommandName(name string) string {
+    name = strings.TrimSpace(name)
+    if len(name) >= 2 {
+        // 只剥离首尾匹配的一层有效引号，这符合 Shell 第一遍扫描的逻辑
+        if (name[0] == '"' && name[len(name)-1] == '"') || 
+           (name[0] == '\'' && name[len(name)-1] == '\'') ||
+           (name[0] == '`' && name[len(name)-1] == '`') {
+            return name[1 : len(name)-1]
+        }
+    }
+    return name
+}
 
 // extractCommandName 从命令节点提取命令名
 func extractCommandName(node *sitter.Node, source string) string {
+	// 消除前置环境变量和重定向的干扰，精准获取命令名
+	if nameNode := node.ChildByFieldName("name");nameNode != nil {
+		return nodeContent(nameNode, source)
+	}
+
 	// 查找第一个 word 或 command_name 节点
 	for i := 0; i < int(node.ChildCount()); i++ {
 		child := node.Child(i)
-		if child.Type() == "command_name" {
-			return nodeContent(child, source)
-		}
-		if child.Type() == "word" {
-			return nodeContent(child, source)
-		}
+        t := child.Type()
+
+        // 明确跳过前置的干扰项（环境变量赋值、重定向、注释等）
+        if t == "variable_assignment" || t == "redirect" || t == "comment" {
+            continue
+        }
+
+        // 过滤完干扰项后，迎面遇到的第一个节点必定是命令主体
+        // 它可能是 "word" (如 ls), 可能是 "string" (如 "ls"), 或者是 "raw_string" (如 'ls')
+        return cleanCommandName(nodeContent(child, source))
 	}
 	return ""
 }
 
-// extractCommandArgs 从命令节点提取参数列表
+// extractCommandArgs 从命令节点提取完整的参数列表
 func extractCommandArgs(node *sitter.Node, source string) []string {
-	var args []string
-	foundName := false
-	for i := 0; i < int(node.ChildCount()); i++ {
-		child := node.Child(i)
-		if child.Type() == "command_name" || child.Type() == "word" {
-			if !foundName {
-				foundName = true
-				continue
-			}
-		}
-		if child.Type() == "word" || child.Type() == "string" || child.Type() == "raw_string" {
-			args = append(args, nodeContent(child, source))
-		}
-	}
-	return args
+    var args []string
+    foundName := false
+
+    for i := 0; i < int(node.ChildCount()); i++ {
+        child := node.Child(i)
+        t := child.Type()
+
+        // 1. 必须同步过滤掉前置的环境变量赋值
+        if t == "variable_assignment" {
+            continue
+        }
+
+        // 2. 必须过滤掉重定向节点（如 >, >>, <），因为重定向不属于命令的参数
+        if t == "redirect" || t == "heredoc_redirect" {
+            continue
+        }
+
+        // 3. 过滤掉注释
+        if t == "comment" {
+            continue
+        }
+
+        // 4. 分水岭：洗净干扰后，遇到的第一个有效节点是命令名本身，必须跳过它
+        if !foundName {
+            foundName = true
+            continue
+        }
+
+        // 5. 核心安全修复：采用“排除法”
+        // 只要能走到这一步，且节点不是某些无意义的特殊符号（如命令末尾的分号或后台运行符 &），它就是参数！
+        // 这样可以完美兼容 file_wildcard(*.go), expansion($VAR), concatenation(a_b) 等所有复杂节点
+        if t != ";" && t != "&" {
+            args = append(args, cleanCommandName(nodeContent(child, source)))
+        }
+    }
+    return args
 }
 
 // analyzeCommand 分析命令节点
@@ -192,15 +270,42 @@ func analyzeCommand(node *sitter.Node, source string) BashAccessType {
 		return BashAccessWrite
 	}
 
+	args := extractCommandArgs(node, source)
+
 	// 特殊处理 bash 命令：如果参数是数字，自动放行
 	if cmdName == "bash" || cmdName == "sh" || cmdName == "zsh" || cmdName == "dash" {
-		args := extractCommandArgs(node, source)
 		if len(args) > 0 && isNumeric(args[0]) {
 			return BashAccessRead
 		}
 	}
 
 	// 分类命令
+	if cmdName == "git" {
+		// 核心安全修复：过滤掉 git 的全局选项（如 -C, --git-dir 等）
+        var subCmd string
+        for _, arg := range args {
+            if !strings.HasPrefix(arg, "-") {
+                subCmd = arg
+                break
+            }
+        }
+
+        // 如果连子命令都没找到，说明语法不完整或未知
+        if subCmd == "" {
+            return BashAccessUnknown
+        }
+
+        // 校验精准路由
+        if gitReadonlySubcommands[subCmd] {
+            return BashAccessRead
+        }
+        if gitWriteSubcommands[subCmd] {
+            return BashAccessWrite
+        }
+        
+        // 未知的 git 子命令（例如 fetch, clone），显式返回 Unknown，不交给通用函数
+        return BashAccessUnknown
+	}
 	return classifyCommand(cmdName)
 }
 
@@ -281,6 +386,7 @@ func classifyCommand(cmdName string) BashAccessType {
 	if writeCommands[cmdName] {
 		return BashAccessWrite
 	}
+
 	return BashAccessUnknown
 }
 

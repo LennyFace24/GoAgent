@@ -3,6 +3,7 @@ package tools
 import (
 	"fmt"
 
+	"github.com/LennyFace24/MiniAgent/internal/config"
 	"github.com/LennyFace24/MiniAgent/internal/metrics"
 	"github.com/LennyFace24/MiniAgent/internal/task"
 	"github.com/LennyFace24/MiniAgent/internal/tools/basic_tool"
@@ -17,6 +18,12 @@ type ToolHandler struct {
 }
 
 func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Collector) (*ToolHandler, error) {
+	cfg := config.GetConfig()
+	workspaceRoot := ""
+	if cfg != nil {
+		workspaceRoot = cfg.Workspace.Root
+	}
+
 	taskManager := task.NewTaskManager()
 	taskCreateTool, err := taskManager.CreateTaskTool()
 	if err != nil {
@@ -35,7 +42,7 @@ func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Colle
 		return nil, fmt.Errorf("创建 list_tasks 工具失败: %w", err)
 	}
 
-	bashTool, err := basictool.NewBashTool()
+	bashTool, err := basictool.NewBashTool(workspaceRoot)
 	if err != nil {
 		return nil, fmt.Errorf("创建 bash 工具失败: %w", err)
 	}
@@ -50,17 +57,17 @@ func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Colle
 		return nil, fmt.Errorf("创建 knowledge_search 工具失败: %w", err)
 	}
 
-	readFileTool, err := basictool.NewReadFileTool()
+	readFileTool, err := basictool.NewReadFileTool(workspaceRoot)
 	if err != nil {
 		return nil, fmt.Errorf("创建 read_file 工具失败: %w", err)
 	}
 
-	writeFileTool, err := basictool.NewWriteFileTool()
+	writeFileTool, err := basictool.NewWriteFileTool(workspaceRoot)
 	if err != nil {
 		return nil, fmt.Errorf("创建 write_file 工具失败: %w", err)
 	}
 
-	editFileTool, err := basictool.NewEditFileTool()
+	editFileTool, err := basictool.NewEditFileTool(workspaceRoot)
 	if err != nil {
 		return nil, fmt.Errorf("创建 edit_file 工具失败: %w", err)
 	}
