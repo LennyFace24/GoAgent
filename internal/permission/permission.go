@@ -68,7 +68,7 @@ type permissionRules struct {
 func loadPermissionConfig(path string) []Rule {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return nil
+		panic("加载权限配置失败: " + err.Error())
 	}
 
 	var file permissionFile

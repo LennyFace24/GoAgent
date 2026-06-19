@@ -64,3 +64,6 @@ docs/
 
 # serena
 .serena/
+
+# cache 
+.*cache/

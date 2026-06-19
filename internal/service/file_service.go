@@ -68,20 +68,27 @@ func NewFileService() *FileService {
 
 func (s *FileService) ProcessFile(ctx context.Context, file multipart.File, filename string) error {
 	// 1. 保存到临时文件
-	tmpPath := filepath.Join(os.TempDir(), filename)
-	dst, err := os.Create(tmpPath)
+	tmpFile,err := os.CreateTemp("", "upload-*"+filepath.Ext(filename))
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)
 	}
-	defer dst.Close()
+	defer func() {
+		os.Remove(tmpFile.Name())
+	}()
 
-	_, err = io.Copy(dst, file)
-	if err != nil {
-		return fmt.Errorf("copy file: %w", err)
+	// copy file content to temp file
+	if _,err := io.Copy(tmpFile,file);err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("save uploaded file: %w", err)
 	}
 
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("close temp file: %w", err)
+	}
+
+
 	// 2. 加载文档
-	docs, err := s.loader.Load(ctx, document.Source{URI: tmpPath})
+	docs, err := s.loader.Load(ctx, document.Source{URI: tmpFile.Name()})
 	if err != nil {
 		return fmt.Errorf("load document: %w", err)
 	}
