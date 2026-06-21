@@ -48,6 +48,14 @@ func (c *Config) ApplyDefaults() {
 	if c == nil {
 		return
 	}
+	// 安全默认：未配置监听地址时只绑定本机回环，避免意外暴露到 0.0.0.0。
+	// Docker 等需要对外监听的场景由配置文件显式覆盖（见 config.docker.yaml）。
+	if c.Server.Host == "" {
+		c.Server.Host = "127.0.0.1"
+	}
+	if c.Server.Port == "" {
+		c.Server.Port = "8080"
+	}
 	if c.Llm.ContextWindow <= 0 {
 		c.Llm.ContextWindow = DefaultContextWindow
 	}

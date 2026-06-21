@@ -1,5 +1,5 @@
 server:
-    host: localhost
+    host: 127.0.0.1
     port: 8080
 llm:
     base_url: https://your-api.com/v1/
