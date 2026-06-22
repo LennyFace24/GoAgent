@@ -6,9 +6,11 @@ import (
 	"github.com/LennyFace24/MiniAgent/internal/config"
 	"github.com/LennyFace24/MiniAgent/internal/metrics"
 	"github.com/LennyFace24/MiniAgent/internal/task"
-	"github.com/LennyFace24/MiniAgent/internal/tools/basic_tool"
-	"github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
-	"github.com/LennyFace24/MiniAgent/internal/tools/extra_tool"
+	basictool "github.com/LennyFace24/MiniAgent/internal/tools/basic_tool"
+	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
+	extratool "github.com/LennyFace24/MiniAgent/internal/tools/extra_tool"
+	sandboxtool "github.com/LennyFace24/MiniAgent/internal/tools/sandbox_tool"
+
 	"github.com/cloudwego/eino/components/tool"
 )
 
@@ -86,6 +88,11 @@ func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Colle
 		return nil, fmt.Errorf("创建 context_status 工具失败: %w", err)
 	}
 
+	sandBoxTool, err := sandboxtool.NewSandBoxTool(cfg.Sandbox.Endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("创建 sandbox_tool 工具失败: %w", err)
+	}
+
 	return &ToolHandler{
 		tools: []tool.BaseTool{
 			bashTool,
@@ -101,6 +108,7 @@ func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Colle
 			taskUpdateStatusTool,
 			taskGetTool,
 			taskListTool,
+			sandBoxTool,
 		},
 		CompactTrigger: compactTrigger,
 	}, nil

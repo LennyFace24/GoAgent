@@ -40,6 +40,9 @@ type Config struct {
 	Workspace struct {
 		Root string `yaml:"root"`
 	} `yaml:"workspace"`
+	Sandbox struct {
+		Endpoint string `yaml:"endpoint"`
+	} `yaml:"sandbox"`
 }
 
 const DefaultContextWindow = 200_000
@@ -67,6 +70,9 @@ func (c *Config) ApplyDefaults() {
 	}
 	if c.Workspace.Root == "" {
 		c.Workspace.Root = "../GoAgent-workspace"
+	}
+	if c.Sandbox.Endpoint == "" {
+		c.Sandbox.Endpoint = "http://localhost:8081"
 	}
 }
 

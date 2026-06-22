@@ -16,3 +16,5 @@ chromadb:
     url: http://chromadb:8088
 session:
     secret_key: session-secret
+sandbox:
+    endpoint: http://localhost:8081
