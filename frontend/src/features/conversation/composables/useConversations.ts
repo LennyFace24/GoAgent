@@ -1,13 +1,10 @@
 import { ref } from 'vue'
 import type { Conversation } from '../types'
 
-export function useConversations() {
-  const conversations = ref<Conversation[]>([])
+const conversations = ref<Conversation[]>([])
 
-  async function init(): Promise<string | null> {
-    const id = await create();
-    return id
-  }
+export function useConversations() {
+
   async function load(): Promise<void> {
     try {
       const res = await fetch('/api/conversations')
@@ -36,7 +33,7 @@ export function useConversations() {
 
   async function remove(id: string): Promise<void> {
     try {
-      await fetch(`/conversation/${id}`, { method: 'DELETE' })
+      await fetch(`/api/conversation/${id}`, { method: 'DELETE' })
       conversations.value = conversations.value.filter((c: Conversation) => c.id !== id)
     } catch { /* ignore */ }
   }

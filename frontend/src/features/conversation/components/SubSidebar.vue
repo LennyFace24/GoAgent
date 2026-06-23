@@ -1,6 +1,6 @@
 ﻿<script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
-import type { Conversation } from '../types'
+import { useConversations } from '../composables/useConversations'
 import { MessageSquare, BarChart3, TrendingUp, PieChart, Upload, FileText } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -15,61 +15,25 @@ const emit = defineEmits<{
   'dashboard-view': [view: string]
 }>()
 
-const conversations = ref<Conversation[]>([])
+const { conversations, load, create, remove } = useConversations()
 const searchQuery = ref('')
 const isUploading = ref(false)
 const uploadProgress = ref(0)
 const docsList = ref<string[]>([])
 
-async function fetchConvs() {
-  try {
-    const res = await fetch('/api/conversations')
-    if (res.ok) {
-      const data = await res.json()
-      conversations.value = data.conversations || []
-    }
-  } catch {
-    // Mock 模式数据 fallback
-    conversations.value = [
-      { id: 'conv_default', title: '全系统健康一键诊断', updated_at: new Date().toISOString() },
-      { id: 'conv_1', title: '服务器 CPU 异常告警排查', updated_at: new Date().toISOString() },
-      { id: 'conv_2', title: 'ChromaDB 语义向量库检索异常', updated_at: new Date().toISOString() }
-    ]
-  }
+async function handleCreate() {
+  const id = await create()
+  if (id) emit('created', id)
 }
 
-async function createNewConv() {
-  const title = '新对话'
-  try {
-    const res = await fetch('/api/conversation', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ title })
-    })
-    if (res.ok) {
-      const data = await res.json()
-      await fetchConvs()
-      emit('created', data.conversation.id)
-    }
-  } catch {
-    const newId = 'conv_' + Date.now()
-    conversations.value.unshift({ id: newId, title, updated_at: new Date().toISOString() })
-    emit('created', newId)
-  }
-}
-
-async function deleteConv(id: string, event: Event) {
+async function handleDelete(id: string, event: Event) {
   event.stopPropagation()
-  try {
-    await fetch('/api/conversation/' + id, { method: 'DELETE' })
-    await fetchConvs()
-    if (props.activeId === id && conversations.value.length > 0) {
+  await remove(id)
+  if (props.activeId === id) {
+    if (conversations.value.length > 0) {
       emit('select', conversations.value[0].id)
-    }
-  } catch {
-    conversations.value = conversations.value.filter(c => c.id !== id)
-    if (props.activeId === id && conversations.value.length > 0) {
-      emit('select', conversations.value[0].id)
+    } else {
+      emit('select', '')
     }
   }
 }
@@ -105,11 +69,11 @@ function uploadFile(file: File) {
 }
 
 onMounted(() => {
-  fetchConvs()
+  load()
 })
 
 watch(() => props.activeNav, () => {
-  fetchConvs()
+  load()
 })
 </script>
 
@@ -129,7 +93,7 @@ watch(() => props.activeNav, () => {
     <div v-if="activeNav === 'chat' || activeNav === 'aiops'" class="sidebar-list">
       <div class="list-title">
         <span>会话列表</span>
-        <button class="new-btn" @click="createNewConv" title="新建会话">+</button>
+        <button class="new-btn" @click="handleCreate" title="新建会话">+</button>
       </div>
       
       <div class="items-container">
@@ -142,7 +106,7 @@ watch(() => props.activeNav, () => {
         >
           <MessageSquare class="item-icon" :size="16" />
           <span class="item-title">{{ conv.title }}</span>
-          <button class="delete-item-btn" @click="deleteConv(conv.id, $event)">×</button>
+          <button class="delete-item-btn" @click="handleDelete(conv.id, $event)">×</button>
         </div>
       </div>
     </div>

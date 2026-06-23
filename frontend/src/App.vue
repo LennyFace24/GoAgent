@@ -1,5 +1,12 @@
 ﻿<script setup lang="ts">
 import { ref,onMounted } from 'vue'
+
+
+
+import { useConversations } from './features/conversation/composables/useConversations'
+
+
+import EmptyConversations from './features/chat/components/EmptyConversations.vue'
 import SlimSidebar from './features/conversation/components/SlimSidebar.vue'
 import SubSidebar from './features/conversation/components/SubSidebar.vue'
 import ChatWorkspace from './features/chat/components/ChatWorkspace.vue'
@@ -25,11 +32,12 @@ function onDashboardViewChange(view: string): void {
 }
 
 onMounted(async () => {
-  const { init } = useConversations()
-  const id = await init();
+  const { load,create } = useConversations()
+  const id = await create();
   if (id) {
     activeConversationId.value = id
   }
+  await load()
 })
 
 </script>
@@ -54,10 +62,13 @@ onMounted(async () => {
     <!-- 第三栏：智能问答主视窗控制台 (Workspace) / 或者核心监控仪表盘 -->
     <keep-alive :include="['ChatWorkspace', 'DashboardView']">
       <ChatWorkspace
-        v-if="activeNav !== 'dashboard'"
+        v-if="activeNav !== 'dashboard' && activeConversationId !== ''" 
         :conversationId="activeConversationId"
         v-model:isMonitorOpen="isMonitorOpen"
       />
+      <EmptyConversations
+        v-else-if="activeNav !== 'dashboard' && activeConversationId === ''"
+       />
       <DashboardView
         v-else
         :view="dashboardView"
