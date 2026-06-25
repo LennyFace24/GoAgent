@@ -3,8 +3,7 @@ export default { name: 'ChatWorkspace' }
 </script>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onActivated, nextTick } from 'vue'
-import type { Message } from '../../../shared/types'
+import { ref, watch, nextTick } from 'vue'
 import ContextStatus from './ContextStatus.vue'
 import InputBar from './InputBar.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
@@ -29,7 +28,6 @@ const emit = defineEmits<{
 
 // ---------- 状态 ----------
 
-const messages = ref<Message[]>([])
 const msgArea = ref<HTMLElement | null>(null)
 const chatMode = ref<'chat' | 'aiops'>('aiops')
 const conversationIdRef = ref(props.conversationId)
@@ -38,27 +36,20 @@ watch(() => props.conversationId, (newId) => {
   conversationIdRef.value = newId
 })
 
-// 新消息自动滚底
-watch(() => messages.value.length, () => {
-  scrollToBottom()
-})
-
 // ---------- Composables ----------
 
 const DEFAULT_WELCOME = '您好，我是您的智能运维助手！您可以输入问题进行分析，或者点击右上角查看 🖥️ 实时系统状态 面板。'
 
-const { isSending, send, abort, loadHistory, respondPermission } = useChat({
-  messages,
+const { messages, isSending, send, abort, respondPermission } = useChat({
   conversationId: conversationIdRef,
   chatMode,
   scrollToBottom,
+  defaultWelcome: DEFAULT_WELCOME,
 })
 
-// ---------- 监听 ----------
-
-watch(() => props.conversationId, () => {
-  abort()
-  loadHistory(DEFAULT_WELCOME)
+// 新消息自动滚底
+watch(() => messages.value.length, () => {
+  scrollToBottom()
 })
 
 // ---------- 工具函数 ----------
@@ -157,15 +148,6 @@ function handleSend(text: string): void {
   }
 }
 
-// ---------- 生命周期 ----------
-
-onMounted(() => {
-  loadHistory(DEFAULT_WELCOME)
-})
-
-onActivated(() => {
-  loadHistory(DEFAULT_WELCOME)
-})
 </script>
 
 <template>
