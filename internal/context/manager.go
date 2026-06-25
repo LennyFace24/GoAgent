@@ -16,8 +16,6 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-
-
 // Slot 代表上下文的一个模块
 type Slot struct {
 	Tag     string // XML 标签名
@@ -50,10 +48,7 @@ func New(budget int64, skillReg *skills.SkillRegistry) *ContextManager {
 	}
 }
 
-
-
 // --- Slot 注入方法 ---
-
 // SetMode 加载 global_rules：system_prompt.md 始终加载，aiops 模式额外追加 ai_ops.md
 func (cm *ContextManager) SetMode(mode string) {
 	// 始终加载 system_prompt.md
@@ -76,9 +71,6 @@ func (cm *ContextManager) SetMode(mode string) {
 
 	cm.setSlot("global_rules", content, 0)
 }
-
-
-
 
 // LoadSystemInfo 注入当前系统环境信息
 func (cm *ContextManager) LoadSystemInfo() {
@@ -112,7 +104,6 @@ func (cm *ContextManager) LoadProjectContext() {
 	cm.setSlot("project_context", strings.TrimSpace(string(data)), 3)
 }
 
-
 // LoadMemory 从文件加载 memory.md，文件不存在则跳过
 func (cm *ContextManager) LoadMemory() {
 	data, err := os.ReadFile(cm.memoryPath)
@@ -137,12 +128,14 @@ func (cm *ContextManager) LoadSkills() {
 // setSlot 设置或更新一个 slot
 func (cm *ContextManager) setSlot(tag, content string, order int) {
 	for i := range cm.slots {
+		// 如果存在这个tag了，证明已经存过这个tag对应的content了，直接覆盖更新
 		if cm.slots[i].Tag == tag {
 			cm.slots[i].Content = content
 			cm.slots[i].Order = order
 			return
 		}
 	}
+	// 添加新的 slot
 	cm.slots = append(cm.slots, Slot{Tag: tag, Content: content, Order: order})
 }
 
@@ -229,6 +222,7 @@ func (cm *ContextManager) BuildMessages(
 	userMsg string,
 ) []*schema.Message {
 	systemMsg := cm.Build()
+	// 拼装：system_message + history + user_message
 	messages := make([]*schema.Message, 0, 1+len(history)+1)
 	if systemMsg != "" {
 		messages = append(messages, schema.SystemMessage(systemMsg))

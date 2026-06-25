@@ -11,6 +11,7 @@ defineProps<{
 
 const emit = defineEmits<{
   select: [cmd: Command]
+  'update:selectedIndex': [index: number]
 }>()
 
 const categoryLabels: Record<string, string> = {
@@ -36,7 +37,7 @@ function getCategoryLabel(category: string): string {
         :key="cmd.name"
         :class="['palette-item', { active: index === selectedIndex }]"
         @click="emit('select', cmd)"
-        @mouseenter="selectedIndex = index"
+        @mouseenter="$emit('update:selectedIndex', index)"
       >
         <div class="item-main">
           <span class="item-name">/{{ cmd.name }}</span>

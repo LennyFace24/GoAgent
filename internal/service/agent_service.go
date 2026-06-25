@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-
 	cfg "github.com/LennyFace24/MiniAgent/internal/config"
 	ctxmgr "github.com/LennyFace24/MiniAgent/internal/context"
 	"github.com/LennyFace24/MiniAgent/internal/permission"
@@ -25,12 +24,10 @@ import (
 	"github.com/google/uuid"
 )
 
-
-
 // ToolEvent 通过 SSE 推送给前端的工具事件
 type ToolEvent struct {
-	Type      string `json:"type"`       // "tool_call" | "tool_result" | "permission_request" | "thinking"
-	Name      string `json:"name"`       // 工具名称
+	Type      string `json:"type"` // "tool_call" | "tool_result" | "permission_request" | "thinking"
+	Name      string `json:"name"` // 工具名称
 	Args      string `json:"args,omitempty"`
 	Result    string `json:"result,omitempty"`
 	CallID    string `json:"call_id,omitempty"`
@@ -50,8 +47,6 @@ type AgentService struct {
 	budget         int64 // 上下文 token 预算（ContextBudgetTokens）
 	skillReg       *skills.SkillRegistry
 }
-
-
 
 func NewAgentService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore) *AgentService {
 	compactTrigger := toolHandler.CompactTrigger
@@ -116,7 +111,6 @@ func (s *AgentService) Stream(ctx context.Context,
 	cm.LoadSkills()
 	cm.LoadMemory()
 
-
 	history = cm.BuildHistory(ctx, history, s.baseModel, sessionID, conversationID)
 	messages := cm.BuildMessages(history, userMsg)
 
@@ -129,14 +123,9 @@ func (s *AgentService) Stream(ctx context.Context,
 
 	iterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
 	toolEvents := make(chan ToolEvent, 64)
-	go s.runLoop(ctx, mode, messages, generator, toolEvents, sessionID, conversationID, ctxState)
+	go s.runLoop(ctx, mode, messages, generator, toolEvents, sessionID, conversationID, ctxState, globalState)
 	return iterator, toolEvents, nil
 }
-
-
-
-
-
 
 func (s *AgentService) runLoop(
 	ctx context.Context,
@@ -147,6 +136,7 @@ func (s *AgentService) runLoop(
 	sessionID string,
 	conversationID string,
 	ctxState *contexttool.ContextState,
+	globalState *contexttool.ContextState,
 ) {
 
 	defer close(toolEvents)
@@ -156,10 +146,7 @@ func (s *AgentService) runLoop(
 	turn := 0
 	todoUncalledCount := 0
 
-
 	for {
-		// 更新上下文状态（使用本次请求的独立实例）
-		ctxState.EstimateAndEstimateMessages(messages)
 
 		// compact 检查
 		level := contexttool.ShouldCompact(messages, ctxState)
@@ -232,10 +219,6 @@ func (s *AgentService) runLoop(
 		// 发送 reply 到 handler 用于持久化
 		replyMsg := schema.AssistantMessage(replyContent, nil)
 		gen.Send(adk.EventFromMessage(replyMsg, nil, schema.Assistant, ""))
-
-
-
-
 
 		log.Printf("[Turn %d] mode=%s ToolCalls 数量: %d", turn, mode, len(toolCalls))
 		for i, tc := range toolCalls {
@@ -354,11 +337,13 @@ func (s *AgentService) runLoop(
 			messages = append(messages, msg)
 		}
 
-
 		if turn >= maxTurns {
 			break
 		}
 		turn++
+		// 更新上下文状态（使用本次请求的独立实例）
+		ctxState.EstimateAndEstimateMessages(messages)
+		globalState.SetTokens(ctxState.GetUsage().CurrentTokens)
 	}
 	stream, err := s.toolModel.Stream(ctx, messages)
 	if err != nil {
@@ -367,7 +352,6 @@ func (s *AgentService) runLoop(
 	}
 	gen.Send(adk.EventFromMessage(nil, stream, schema.Assistant, ""))
 }
-
 
 func (s *AgentService) executeTool(ctx context.Context, tc schema.ToolCall) (string, error) {
 	for _, t := range s.tools {

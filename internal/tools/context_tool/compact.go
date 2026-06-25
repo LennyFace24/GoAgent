@@ -17,14 +17,11 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-
 const (
 	KeepRecentTurns        = 6
 	KeepRecentMicroCompact = 6
 	TranscriptDir          = "data/transcripts"
 )
-
-
 
 // ---------- compact 工具定义 ----------
 
@@ -152,8 +149,7 @@ func CompactFunc(ctx context.Context, messages []*schema.Message, chatModel mode
 
 	result := messages[:0]
 	result = append(result, systemMsg)
-	result = append(result, schema.UserMessage("[系统] 以下是之前对话的压缩摘要：\n"+summary))
-	result = append(result, schema.AssistantMessage("好的，我已了解之前的对话内容，请继续。", nil))
+	result = append(result, schema.UserMessage(summary))
 	result = append(result, recentMessages...)
 
 	log.Printf("CompactFunc: 压缩完成，消息数 %d -> %d", len(messages), len(result))
@@ -165,27 +161,33 @@ func summarizeOldMessages(ctx context.Context, messages []*schema.Message, chatM
 	for _, m := range messages {
 		switch m.Role {
 		case schema.User:
-			content += "用户: " + m.Content + "\n"
+			content += "[User]" + m.Content + "\n"
 		case schema.Assistant:
 			if m.Content != "" {
-				content += "助手: " + m.Content + "\n"
+				content += "[Assistant] " + m.Content + "\n"
 			}
 			for _, tc := range m.ToolCalls {
-				content += fmt.Sprintf("助手调用工具: %s(%s)\n", tc.Function.Name, tc.Function.Arguments)
+				content += fmt.Sprintf("[toolCall] : %s(%s)\n", tc.Function.Name, tc.Function.Arguments)
 			}
 		case schema.Tool:
-			content += fmt.Sprintf("工具[%s]: %s\n", m.ToolName, truncate(m.Content, 500))
+			content += fmt.Sprintf("[tool] : %s(%s)\n", m.ToolName, truncate(m.Content, 500))
 		case schema.System:
-			content += "系统: " + m.Content + "\n"
+			content += "[System] : " + m.Content + "\n"
 		}
 	}
 
 	if len(content) > 100000 {
 		content = content[:100000] + "\n...(截断)"
 	}
+	file, err := os.ReadFile("internal/tools/context_tool/compact_rule.md")
+	if err != nil {
+		log.Printf("summarizeOldMessages: 读取压缩规则文件失败: %v", err)
+		return "", err
+	}
+	data := strings.TrimSpace(string(file))
 
 	summarizePrompt := []*schema.Message{
-		schema.SystemMessage("你是一个对话摘要助手。请将以下对话历史压缩为简洁的摘要，保留关键信息、决策、工具调用结果和未完成的任务。摘要应控制在3000字以内。"),
+		schema.SystemMessage(data),
 		schema.UserMessage(content),
 	}
 

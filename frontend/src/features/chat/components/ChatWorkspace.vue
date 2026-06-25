@@ -6,7 +6,7 @@ export default { name: 'ChatWorkspace' }
 import { ref, watch, onMounted, onActivated, nextTick } from 'vue'
 import type { Message } from '../../../shared/types'
 import ContextStatus from './ContextStatus.vue'
-import CommandPalette from './CommandPalette.vue'
+import InputBar from './InputBar.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
 import ToolCallBlock from './ToolCallBlock.vue'
 import ToolResultBlock from './ToolResultBlock.vue'
@@ -14,7 +14,6 @@ import PermissionCard from './PermissionCard.vue'
 import MessageBubble from './MessageBubble.vue'
 import LoadingCard from './LoadingCard.vue'
 
-import { useCommands, type Command } from '../composables/useCommands'
 import { useChat } from '../composables/useChat'
 
 // ---------- Props & Emits ----------
@@ -31,7 +30,6 @@ const emit = defineEmits<{
 // ---------- 状态 ----------
 
 const messages = ref<Message[]>([])
-const inputText = ref('')
 const msgArea = ref<HTMLElement | null>(null)
 const chatMode = ref<'chat' | 'aiops'>('aiops')
 const conversationIdRef = ref(props.conversationId)
@@ -56,20 +54,7 @@ const { isSending, send, abort, loadHistory, respondPermission } = useChat({
   scrollToBottom,
 })
 
-const {
-  visible: paletteVisible,
-  selectedIndex: commandSelectedIndex,
-  filteredCommands,
-  updateFromInput,
-  onKeydown: onCommandKeydown,
-  selectCommand,
-} = useCommands()
-
 // ---------- 监听 ----------
-
-watch(inputText, (val) => {
-  updateFromInput(val)
-})
 
 watch(() => props.conversationId, () => {
   abort()
@@ -85,45 +70,31 @@ function scrollToBottom() {
 }
 
 function triggerQuickAction(text: string) {
-  inputText.value = text
-  handleSend()
+  send(text)
 }
 
 // ---------- 命令处理 ----------
-
-function onCommandSelect(cmd: Command): void {
-  const name = selectCommand(cmd)
-  executeCommand(name)
-}
 
 function executeCommand(name: string): void {
   switch (name) {
     case 'clear':
       messages.value = []
-      inputText.value = ''
-      break
-    case 'new':
-      inputText.value = ''
-      send('/new')
       break
     case 'compact':
-      inputText.value = ''
       send('/compact')
       break
     case 'context':
       showContextStatus()
-      inputText.value = ''
       break
     case 'help':
       showHelp()
-      inputText.value = ''
       break
     case 'model':
       showModelInfo()
-      inputText.value = ''
       break
     default:
-      inputText.value = `/${name} `
+      // 未识别的命令交给后端处理
+      send(`/${name}`)
       break
   }
 }
@@ -152,35 +123,37 @@ function showHelp() {
   messages.value.push({
     id: Date.now(),
     role: 'assistant',
-    content: `📖 **可用命令**\n\n| 命令 | 说明 |\n|------|------|\n| /help | 显示此帮助信息 |\n| /clear | 清空当前对话 |\n| /new | 新建对话 |\n| /compact | 触发上下文压缩 |\n| /context | 显示上下文状态 |\n| /model | 显示模型信息 |`,
+    content: `📖 **可用命令**\n\n| 命令 | 说明 |\n|------|------|\n| /help | 显示此帮助信息 |\n| /clear | 清空当前对话 |\n| /compact | 触发上下文压缩 |\n| /context | 显示上下文状态 |\n| /model | 显示模型信息 |`,
   })
 }
 
-function showModelInfo() {
+async function showModelInfo() {
+  let modelName = '未知'
+  try {
+    const res = await fetch('/api/model', { credentials: 'include' })
+    if (res.ok) {
+      const data = await res.json()
+      modelName = data.model || modelName
+    }
+  } catch { /* ignore */ }
   messages.value.push({
     id: Date.now(),
     role: 'assistant',
-    content: `🤖 **当前模式**: ${chatMode.value === 'aiops' ? '运维诊断' : '自由对话'}\n\n模型信息可通过系统监控面板查看。`,
+    content: `🤖 **当前模型**: \`${modelName}\`\n\n**当前模式**: ${chatMode.value === 'aiops' ? '运维诊断' : '自由对话'}`,
   })
 }
 
 // ---------- 输入处理 ----------
 
-function handleSend() {
-  const text = inputText.value.trim()
-  if (!text) return
-  inputText.value = ''
-  send(text)
-}
-
-function onInputKeydown(e: KeyboardEvent): void {
-  if (paletteVisible.value) {
-    const handled = onCommandKeydown(e)
-    if (handled) return
-  }
-  if (e.key === 'Enter' && !e.shiftKey) {
-    e.preventDefault()
-    handleSend()
+// InputBar 发送：斜杠命令走本地副作用，其余发给后端
+function handleSend(text: string): void {
+  const trimmed = text.trim()
+  if (!trimmed) return
+  if (trimmed.startsWith('/')) {
+    const name = trimmed.slice(1).split(/\s+/)[0]
+    executeCommand(name)
+  } else {
+    send(trimmed)
   }
 }
 
@@ -293,26 +266,12 @@ onActivated(() => {
       </div>
 
       <!-- Input -->
-      <div class="input-container">
-        <div class="input-wrapper">
-          <CommandPalette
-            :commands="filteredCommands"
-            :selectedIndex="commandSelectedIndex"
-            :visible="paletteVisible"
-            @select="onCommandSelect"
-          />
-          <textarea
-            v-model="inputText"
-            @keydown="onInputKeydown"
-            placeholder="向 AI 助理提问或下达运维诊断指令... 输入 / 查看可用命令"
-            class="smart-textarea"
-            rows="1"
-          ></textarea>
-        </div>
-        <button class="send-btn" :disabled="!inputText.trim() || isSending" @click="handleSend">
-          {{ isSending ? '...' : '发送' }}
-        </button>
-      </div>
+      <InputBar
+        :mode="chatMode"
+        :sending="isSending"
+        @send="handleSend"
+        @stop="abort"
+      />
     </div>
   </div>
 </template>
@@ -459,56 +418,5 @@ onActivated(() => {
   color: #fff;
   font-weight: 600;
   box-shadow: 0 1px 4px rgba(0,0,0,0.15);
-}
-
-.input-container {
-  display: flex;
-  gap: 8px;
-}
-
-.input-wrapper {
-  flex: 1;
-  position: relative;
-}
-
-.smart-textarea {
-  width: 100%;
-  padding: 10px 14px;
-  border: 1px solid var(--border-input);
-  border-radius: 8px;
-  background: var(--bg-input);
-  color: var(--text-primary);
-  font-size: 14px;
-  resize: none;
-  outline: none;
-  transition: border-color 0.2s;
-}
-
-.smart-textarea:focus {
-  border-color: var(--accent);
-}
-
-.smart-textarea::placeholder {
-  color: var(--text-secondary);
-}
-
-.send-btn {
-  padding: 10px 20px;
-  border: none;
-  border-radius: 8px;
-  background: var(--accent);
-  color: white;
-  font-size: 14px;
-  cursor: pointer;
-  transition: opacity 0.2s;
-}
-
-.send-btn:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.send-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 </style>

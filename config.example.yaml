@@ -15,6 +15,6 @@ embedding:
 session:
     secret_key: session-secret
 workspace:
-    root: ../GoAgent-workspace
+    root: 
 sandbox:
     endpoint: http://localhost:8081

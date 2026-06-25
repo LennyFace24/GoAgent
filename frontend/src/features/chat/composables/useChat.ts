@@ -266,11 +266,20 @@ export function useChat(options: UseChatOptions) {
     } catch { /* ignore */ }
   }
 
-  // 中止当前请求
+  // 中止当前请求（用户主动停止）
   function abort() {
     if (activeAbort) {
       activeAbort.abort()
       activeAbort = null
+    }
+    // 找到最后一条正在流式的 assistant 消息，保留已回复内容并追加终止标记
+    for (let i = messages.value.length - 1; i >= 0; i--) {
+      const m = messages.value[i]
+      if (m.role === 'assistant' && m.streaming) {
+        m.streaming = false
+        m.content += '\n\n该回答此处被用户终止'
+        break
+      }
     }
     isSending.value = false
   }

@@ -69,7 +69,7 @@ func (c *Config) ApplyDefaults() {
 		c.Llm.SafetyMarginTokens = 0
 	}
 	if c.Workspace.Root == "" {
-		c.Workspace.Root = "../GoAgent-workspace"
+		c.Workspace.Root = "."
 	}
 	if c.Sandbox.Endpoint == "" {
 		c.Sandbox.Endpoint = "http://localhost:8081"

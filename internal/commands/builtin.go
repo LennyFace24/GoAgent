@@ -20,13 +20,6 @@ func registerBuiltinCommands(r *Registry) {
 			Type:        CommandTypeClient,
 		},
 		{
-			Name:        "new",
-			Description: "创建一个新的对话",
-			Usage:       "/new",
-			Category:    "conversation",
-			Type:        CommandTypeClient,
-		},
-		{
 			Name:        "compact",
 			Description: "触发上下文压缩，将旧消息压缩为摘要",
 			Usage:       "/compact",

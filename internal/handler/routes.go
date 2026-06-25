@@ -2,11 +2,12 @@ package handler
 
 import (
 	"github.com/LennyFace24/MiniAgent/internal/commands"
+	cfg "github.com/LennyFace24/MiniAgent/internal/config"
 	"github.com/LennyFace24/MiniAgent/internal/metrics"
 	"github.com/LennyFace24/MiniAgent/internal/service"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
-	"github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
+	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/gin-gonic/gin"
 )
 
@@ -61,6 +62,7 @@ func SetupRoutes(r *gin.Engine) {
 
 		// 斜杠命令列表
 		api.GET("/commands", getCommands)
+		api.GET("/model", getModel)
 	}
 
 	// 上下文状态查询
@@ -72,6 +74,11 @@ func getCommands(c *gin.Context) {
 	registry := commands.GetRegistry()
 	cmds := registry.List()
 	c.JSON(200, gin.H{"commands": cmds})
+}
+
+// getModel 返回当前配置使用的模型名称
+func getModel(c *gin.Context) {
+	c.JSON(200, gin.H{"model": cfg.GetConfig().Llm.Model})
 }
 
 // getContextStatus 获取上下文使用状态
