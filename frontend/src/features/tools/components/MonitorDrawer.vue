@@ -1,5 +1,6 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, onUnmounted, watch } from 'vue'
+import { Activity, X, Check, TriangleAlert, Radio } from 'lucide-vue-next'
 import type { MetricsData } from '../types'
 
 const props = defineProps<{
@@ -61,8 +62,13 @@ onUnmounted(() => {
 <template>
   <div class="monitor-drawer" :class="{ open: isOpen }">
     <div class="drawer-header">
-      <span class="header-title">🖥️ 实时系统状态</span>
-      <button class="close-btn" @click="emit('close')">×</button>
+      <div class="header-title-wrap">
+        <span class="header-icon"><Activity :size="15" :stroke-width="2" /></span>
+        <span class="header-title">实时系统状态</span>
+      </div>
+      <button class="close-btn" @click="emit('close')" title="关闭">
+        <X :size="16" :stroke-width="2.2" />
+      </button>
     </div>
 
     <div class="drawer-content">
@@ -86,7 +92,10 @@ onUnmounted(() => {
       <template v-else-if="data">
         <!-- 系统运行状态 -->
         <div class="status-card" :class="data.down_count > 0 ? 'warn' : 'ok'">
-          <span class="card-title">系统运行状态</span>
+          <span class="card-title">
+            <Radio :size="11" :stroke-width="2.2" />
+            <span>系统运行状态</span>
+          </span>
           <div class="indicator-group">
             <span class="status-dot" :class="data.down_count > 0 ? 'yellow' : 'green'"></span>
             <span class="status-text">
@@ -206,7 +215,7 @@ onUnmounted(() => {
           </div>
           <div v-if="data.oom_kills_1h != null" class="mini-card">
             <span class="mini-label">OOM Kills (1h)</span>
-            <span class="mini-val" :style="{ color: data.oom_kills_1h > 0 ? '#e53e3e' : 'inherit', fontWeight: data.oom_kills_1h > 0 ? 'bold' : 'normal' }">{{ data.oom_kills_1h.toFixed(0) }} 次</span>
+            <span class="mini-val" :style="{ color: data.oom_kills_1h > 0 ? '#ff5a6e' : 'inherit', fontWeight: data.oom_kills_1h > 0 ? 'bold' : 'normal' }">{{ data.oom_kills_1h.toFixed(0) }} 次</span>
           </div>
         </div>
 
@@ -215,7 +224,10 @@ onUnmounted(() => {
           <span class="section-title">采集目标状态</span>
           <div class="alerts-list">
             <div v-for="(t, i) in data.targets" :key="i" class="alert-item" :class="t.up ? 'success' : 'warn'">
-              <span class="alert-icon">{{ t.up ? '✓' : '⚠️' }}</span>
+              <span class="alert-icon" :class="t.up ? 'success' : 'warn'">
+                <Check v-if="t.up" :size="12" :stroke-width="2.6" />
+                <TriangleAlert v-else :size="12" :stroke-width="2.2" />
+              </span>
               <div class="alert-body">
                 <span class="alert-desc">{{ t.job }}</span>
                 <span class="alert-time">{{ t.instance }}</span>
@@ -230,17 +242,20 @@ onUnmounted(() => {
 
 <style scoped>
 .monitor-drawer {
-  width: 280px;
+  width: var(--monitor-drawer-w);
   background: var(--bg-sidebar-sub);
-  border-left: 1px solid var(--border-color);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-left: 1px solid var(--border-glass);
   position: fixed;
-  right: -300px;
+  right: -360px;
   top: 0;
   height: 100vh;
-  transition: right 0.3s ease;
+  transition: right 0.42s var(--ease-out-expo);
   z-index: 100;
   display: flex;
   flex-direction: column;
+  box-shadow: var(--shadow-lg);
 }
 
 .monitor-drawer.open {
@@ -248,66 +263,91 @@ onUnmounted(() => {
 }
 
 .drawer-header {
-  padding: 20px;
-  border-bottom: 1px solid var(--border-color);
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--border-hairline);
   display: flex;
   justify-content: space-between;
   align-items: center;
 }
 
+.header-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-icon {
+  display: flex;
+  color: var(--accent-bright);
+}
+
 .header-title {
+  font-family: var(--font-display);
   font-size: 0.88rem;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-heading);
+  letter-spacing: -0.01em;
 }
 
 .close-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
-  border: none;
-  font-size: 1.5rem;
+  border: 1px solid transparent;
   color: var(--text-secondary);
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius-md);
   cursor: pointer;
+  transition: all var(--transition-spring);
 }
 
 .close-btn:hover {
   color: var(--text-primary);
+  background: var(--bg-hover);
+  border-color: var(--border-glass);
+  transform: rotate(90deg);
 }
 
 .drawer-content {
-  padding: 20px;
+  padding: 18px 20px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 18px;
 }
 
 .status-card {
   background: var(--bg-input);
   padding: 14px;
   border-radius: var(--radius-lg);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-glass);
 }
 
 .status-card.ok {
-  border-color: rgba(16, 163, 127, 0.3);
+  border-color: rgba(0, 255, 157, 0.3);
 }
 
 .status-card.warn {
-  border-color: rgba(255, 159, 64, 0.3);
+  border-color: rgba(255, 180, 84, 0.3);
 }
 
 .status-card.error {
-  border-color: rgba(229, 62, 62, 0.3);
-  background: rgba(229, 62, 62, 0.04);
+  border-color: rgba(255, 90, 110, 0.35);
+  background: rgba(255, 90, 110, 0.05);
 }
 
 .card-title {
-  font-size: 0.72rem;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.66rem;
   color: var(--text-muted);
-  font-weight: 700;
+  font-weight: 600;
   text-transform: uppercase;
-  margin-bottom: 8px;
-  display: block;
+  letter-spacing: 0.14em;
+  margin-bottom: 9px;
 }
 
 .indicator-group {
@@ -325,30 +365,28 @@ onUnmounted(() => {
 }
 
 .status-dot.green {
-  background: var(--accent);
-  box-shadow: 0 0 6px var(--accent);
+  background: var(--accent-bright);
+  box-shadow: 0 0 8px var(--accent-glow);
   animation: none;
 }
 
 .status-dot.yellow {
-  background: #ff9f40;
-  box-shadow: 0 0 6px #ff9f40;
+  background: var(--text-warning);
+  box-shadow: 0 0 8px var(--text-warning);
   animation: none;
 }
 
 .status-dot.red {
-  background: #e53e3e;
-  box-shadow: 0 0 6px #e53e3e;
+  background: var(--text-error);
+  box-shadow: 0 0 8px var(--text-error);
   animation: none;
 }
 
 @keyframes pulse {
-
   0%,
   100% {
     opacity: 0.3;
   }
-
   50% {
     opacity: 1;
   }
@@ -361,22 +399,23 @@ onUnmounted(() => {
 }
 
 .target-counts {
-  margin-top: 6px;
+  margin-top: 7px;
   font-size: 0.7rem;
+  font-family: var(--font-mono);
 }
 
 .up-label {
-  color: var(--accent);
+  color: var(--accent-bright);
 }
 
 .down-label {
-  color: #e53e3e;
+  color: var(--text-error);
 }
 
 .metric-card {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 7px;
 }
 
 .metric-header {
@@ -389,59 +428,64 @@ onUnmounted(() => {
 .metric-val {
   font-weight: 600;
   color: var(--text-heading);
+  font-family: var(--font-mono);
 }
 
 .metric-sub {
-  font-size: 0.68rem;
+  font-size: 0.66rem;
   color: var(--text-muted);
-  margin-top: 2px;
+  margin-top: 1px;
+  font-family: var(--font-mono);
 }
 
 .bar-bg {
   width: 100%;
-  height: 8px;
-  background: var(--bg-input);
-  border-radius: 4px;
+  height: 6px;
+  background: var(--bg-active);
+  border-radius: var(--radius-pill);
   overflow: hidden;
 }
 
 .bar-fill {
   height: 100%;
-  background: var(--accent);
-  border-radius: 4px;
-  transition: width 0.5s ease-in-out;
+  background: var(--accent-gradient);
+  border-radius: var(--radius-pill);
+  transition: width 0.5s var(--ease-out-expo);
 }
 
 .bar-fill.warning {
-  background: #e53e3e;
+  background: linear-gradient(90deg, var(--text-warning), var(--text-error));
 }
 
 .stats-row {
   display: flex;
-  gap: 10px;
+  gap: 9px;
 }
 
 .mini-card {
   flex: 1;
   background: var(--bg-input);
-  padding: 10px;
+  padding: 10px 11px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-glass);
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .mini-label {
-  font-size: 0.65rem;
+  font-size: 0.62rem;
   color: var(--text-muted);
   font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
 }
 
 .mini-val {
   font-size: 0.8rem;
   font-weight: 700;
   color: var(--text-heading);
+  font-family: var(--font-mono);
 }
 
 .alerts-section {
@@ -451,10 +495,11 @@ onUnmounted(() => {
 }
 
 .section-title {
-  font-size: 0.72rem;
-  font-weight: 700;
+  font-size: 0.66rem;
+  font-weight: 600;
   color: var(--text-muted);
   text-transform: uppercase;
+  letter-spacing: 0.14em;
 }
 
 .alerts-list {
@@ -465,24 +510,41 @@ onUnmounted(() => {
 
 .alert-item {
   display: flex;
-  gap: 8px;
-  padding: 8px 10px;
+  gap: 9px;
+  padding: 9px 11px;
   border-radius: var(--radius-md);
   font-size: 0.75rem;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-glass);
 }
 
 .alert-item.warn {
-  background: rgba(255, 159, 64, 0.05);
+  background: rgba(255, 180, 84, 0.06);
+  border-color: rgba(255, 180, 84, 0.2);
 }
 
 .alert-item.success {
-  background: rgba(16, 163, 127, 0.04);
+  background: rgba(0, 255, 157, 0.05);
+  border-color: rgba(0, 255, 157, 0.2);
 }
 
 .alert-icon {
-  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
   flex-shrink: 0;
+}
+
+.alert-icon.success {
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+}
+
+.alert-icon.warn {
+  background: rgba(255, 180, 84, 0.15);
+  color: var(--text-warning);
 }
 
 .alert-body {
@@ -501,7 +563,8 @@ onUnmounted(() => {
 }
 
 .alert-time {
-  font-size: 0.65rem;
+  font-size: 0.64rem;
   color: var(--text-muted);
+  font-family: var(--font-mono);
 }
 </style>

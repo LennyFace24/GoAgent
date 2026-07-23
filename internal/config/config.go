@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"sync"
 
@@ -9,8 +10,9 @@ import (
 )
 
 var (
-	config *Config
-	once   sync.Once
+	config  *Config
+	once    sync.Once
+	loadErr error
 )
 
 type Config struct {
@@ -89,28 +91,52 @@ func (c *Config) ContextBudgetTokens() int64 {
 	return int64(budget)
 }
 
-func LoadConfig(path string) *Config {
+// Validate 校验必填字段，缺失时返回明确错误，避免延迟到 LLM 调用时才报错。
+func (c *Config) Validate() error {
+	if c == nil {
+		return fmt.Errorf("config is nil")
+	}
+	if c.Llm.BaseUrl == "" {
+		return fmt.Errorf("llm.base_url 不能为空")
+	}
+	if c.Llm.ApiKey == "" {
+		return fmt.Errorf("llm.api_key 不能为空")
+	}
+	if c.Llm.Model == "" {
+		return fmt.Errorf("llm.model 不能为空")
+	}
+	if c.Session.SecretKey == "" {
+		return fmt.Errorf("session.secret_key 不能为空")
+	}
+	return nil
+}
+
+func LoadConfig(path string) (*Config, error) {
 	once.Do(func() {
-		cfg, err := os.ReadFile(path)
-		if err != nil {
-			fmt.Errorf("读取配置文件出错: %v", err)
-			return
-		}
-		err = yaml.Unmarshal(cfg, &config)
-		if err != nil {
-			fmt.Errorf("配置文件解析成yaml错误: %v", err)
-			return
-		}
-		if config != nil {
-			config.ApplyDefaults()
-		}
+		config, loadErr = loadAndValidate(path)
 	})
-	return config
+	return config, loadErr
+}
+
+func loadAndValidate(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("读取配置文件失败: %w", err)
+	}
+	var c Config
+	if err := yaml.Unmarshal(data, &c); err != nil {
+		return nil, fmt.Errorf("解析配置文件失败: %w", err)
+	}
+	c.ApplyDefaults()
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
+	return &c, nil
 }
 
 func GetConfig() *Config {
 	if config == nil {
-		fmt.Errorf("配置文件未加载")
+		log.Printf("配置文件未加载")
 		return nil
 	}
 	return config

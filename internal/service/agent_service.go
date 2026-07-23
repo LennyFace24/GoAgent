@@ -127,6 +127,46 @@ func (s *AgentService) Stream(ctx context.Context,
 	return iterator, toolEvents, nil
 }
 
+// collectTurn 读取一轮模型流，推送 thinking_delta/delta 事件到 toolEvents，
+// 并累积跨 chunk 分片的 tool_calls，返回本轮的 toolCalls、思考内容与回复内容。
+func collectTurn(stream *schema.StreamReader[*schema.Message], toolEvents chan<- ToolEvent) (toolCalls []schema.ToolCall, thinking, reply string) {
+	var thinkingBuilder, replyBuilder strings.Builder
+	for {
+		chunk, err := stream.Recv()
+		if err != nil {
+			break
+		}
+		if chunk.ReasoningContent != "" {
+			thinkingBuilder.WriteString(chunk.ReasoningContent)
+			toolEvents <- ToolEvent{
+				Type:    "thinking_delta",
+				Content: chunk.ReasoningContent,
+			}
+		}
+		if chunk.Content != "" {
+			replyBuilder.WriteString(chunk.Content)
+			toolEvents <- ToolEvent{
+				Type:    "delta",
+				Content: chunk.Content,
+			}
+		}
+		for i, tc := range chunk.ToolCalls {
+			if i < len(toolCalls) {
+				toolCalls[i].Function.Arguments += tc.Function.Arguments
+				if tc.Function.Name != "" {
+					toolCalls[i].Function.Name = tc.Function.Name
+				}
+				if tc.ID != "" {
+					toolCalls[i].ID = tc.ID
+				}
+			} else {
+				toolCalls = append(toolCalls, tc)
+			}
+		}
+	}
+	return toolCalls, thinkingBuilder.String(), replyBuilder.String()
+}
+
 func (s *AgentService) runLoop(
 	ctx context.Context,
 	mode string,
@@ -168,48 +208,7 @@ func (s *AgentService) runLoop(
 		}
 
 		// 读取 stream，统一处理 thinking 和 reply 内容
-		var toolCalls []schema.ToolCall
-		var thinkingBuilder strings.Builder
-		var replyBuilder strings.Builder
-
-		for {
-			chunk, err := stream.Recv()
-			if err != nil {
-				break
-			}
-			// thinking 内容
-			if chunk.ReasoningContent != "" {
-				thinkingBuilder.WriteString(chunk.ReasoningContent)
-				toolEvents <- ToolEvent{
-					Type:    "thinking_delta",
-					Content: chunk.ReasoningContent,
-				}
-			}
-			// reply 内容
-			if chunk.Content != "" {
-				replyBuilder.WriteString(chunk.Content)
-				toolEvents <- ToolEvent{
-					Type:    "delta",
-					Content: chunk.Content,
-				}
-			}
-			// 收集 tool calls
-			for i, tc := range chunk.ToolCalls {
-				if i < len(toolCalls) {
-					toolCalls[i].Function.Arguments += tc.Function.Arguments
-					if tc.Function.Name != "" {
-						toolCalls[i].Function.Name = tc.Function.Name
-					}
-					if tc.ID != "" {
-						toolCalls[i].ID = tc.ID
-					}
-				} else {
-					toolCalls = append(toolCalls, tc)
-				}
-			}
-		}
-		thinkingContent := thinkingBuilder.String()
-		replyContent := replyBuilder.String()
+		toolCalls, thinkingContent, replyContent := collectTurn(stream, toolEvents)
 
 		// 发送 thinking 结束信号
 		if thinkingContent != "" {

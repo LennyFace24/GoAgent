@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
+import { Send, Square } from 'lucide-vue-next'
 import CommandPalette from './CommandPalette.vue'
 import { useCommands, type Command } from '../composables/useCommands'
 
@@ -121,9 +122,10 @@ function onButtonClick(): void {
           :class="{ 'is-stop': sending }"
           :disabled="!sending && !input.trim()"
           @click="onButtonClick"
+          :title="sending ? '停止生成' : '发送'"
         >
-          <svg v-if="!sending" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
-          <svg v-else width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+          <Square v-if="sending" :size="15" :stroke-width="2.4" fill="currentColor" />
+          <Send v-else :size="16" :stroke-width="2.2" />
         </button>
       </div>
     </div>
@@ -133,6 +135,8 @@ function onButtonClick(): void {
 <style scoped>
 .input-bar {
   display: flex;
+  max-width: 920px;
+  margin: 0 auto;
 }
 
 .input-wrapper {
@@ -141,27 +145,79 @@ function onButtonClick(): void {
 }
 
 .input-row {
-  display: flex; gap: 8px; align-items: flex-end;
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  padding: 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-xl);
+  backdrop-filter: var(--glass-blur-lite);
+  -webkit-backdrop-filter: var(--glass-blur-lite);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  box-shadow: var(--shadow-sm);
 }
+
+.input-row:focus-within {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 4px var(--accent-dim), var(--shadow-md);
+}
+
 .input-row textarea {
-  flex: 1; background: var(--bg-input); border: 1px solid var(--border-input);
-  border-radius: 8px; color: var(--text-primary); padding: 10px 14px;
-  font-size: 14px; outline: none; resize: none;
-  font-family: inherit; line-height: 1.5;
-  min-height: 42px; max-height: 120px;
-  transition: border-color var(--transition-fast);
+  flex: 1;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  padding: 10px 12px;
+  font-size: 0.88rem;
+  font-family: var(--font-sans);
+  letter-spacing: -0.005em;
+  outline: none;
+  resize: none;
+  line-height: 1.55;
+  min-height: 30px;
+  max-height: 140px;
 }
-.input-row textarea:focus { border-color: var(--accent); }
-.input-row textarea::placeholder { color: var(--text-secondary); }
+
+.input-row textarea::placeholder {
+  color: var(--text-muted);
+}
 
 .send-btn {
-  width: 42px; height: 42px; border-radius: 8px;
-  background: var(--accent); border: none; color: #fff;
-  cursor: pointer; display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; transition: opacity var(--transition-fast);
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-lg);
+  background: var(--accent-gradient);
+  border: none;
+  color: #07070b;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: transform var(--transition-spring), opacity var(--transition-fast),
+    box-shadow var(--transition-fast);
+  box-shadow: 0 4px 16px var(--accent-glow);
 }
-.send-btn:hover { opacity: 0.9; }
-.send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-.send-btn.is-stop { background: #ef4444; }
-.send-btn.is-stop:hover { opacity: 0.9; }
+
+.send-btn:hover:not(:disabled) {
+  transform: translateY(-2px) scale(1.04);
+  box-shadow: 0 6px 22px var(--accent-glow);
+}
+
+.send-btn:active:not(:disabled) {
+  transform: translateY(0) scale(0.96);
+}
+
+.send-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.send-btn.is-stop {
+  background: linear-gradient(135deg, #ff5a6e, #e53e3e);
+  color: #fff;
+  box-shadow: 0 4px 16px rgba(255, 90, 110, 0.4);
+}
 </style>

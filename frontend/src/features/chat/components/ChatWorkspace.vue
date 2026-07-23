@@ -4,6 +4,7 @@ export default { name: 'ChatWorkspace' }
 
 <script setup lang="ts">
 import { ref, watch, nextTick } from 'vue'
+import { Cpu, ScrollText, HardDrive, MessageCircle, Stethoscope, MonitorPlay } from 'lucide-vue-next'
 import ContextStatus from './ContextStatus.vue'
 import InputBar from './InputBar.vue'
 import ThinkingBlock from './ThinkingBlock.vue'
@@ -38,7 +39,7 @@ watch(() => props.conversationId, (newId) => {
 
 // ---------- Composables ----------
 
-const DEFAULT_WELCOME = '您好，我是您的智能运维助手！您可以输入问题进行分析，或者点击右上角查看 🖥️ 实时系统状态 面板。'
+const DEFAULT_WELCOME = '您好，我是您的智能运维助手。您可以输入问题进行分析，或点击右上角查看实时系统状态面板。'
 
 const { messages, isSending, send, abort, respondPermission } = useChat({
   conversationId: conversationIdRef,
@@ -98,13 +99,13 @@ async function showContextStatus() {
       credentials: 'include',
     })
 
-
     if (res.ok) {
       const data = await res.json()
+      const stateLabel = data.percentage > 90 ? '危险' : data.percentage > 70 ? '警告' : '正常'
       messages.value.push({
         id: Date.now(),
         role: 'assistant',
-        content: `📊 **上下文状态**\n\n- Token 使用: ${data.current_tokens.toLocaleString()} / ${data.max_tokens.toLocaleString()} (${data.percentage.toFixed(1)}%)\n- 消息数量: ${data.message_count}\n- 状态: ${data.percentage > 90 ? '🔴 危险' : data.percentage > 70 ? '🟡 警告' : '🟢 正常'}`,
+        content: `**上下文状态**\n\n- Token 使用: ${data.current_tokens.toLocaleString()} / ${data.max_tokens.toLocaleString()} (${data.percentage.toFixed(1)}%)\n- 消息数量: ${data.message_count}\n- 状态: ${stateLabel}`,
       })
     }
   } catch { /* ignore */ }
@@ -114,7 +115,7 @@ function showHelp() {
   messages.value.push({
     id: Date.now(),
     role: 'assistant',
-    content: `📖 **可用命令**\n\n| 命令 | 说明 |\n|------|------|\n| /help | 显示此帮助信息 |\n| /clear | 清空当前对话 |\n| /compact | 触发上下文压缩 |\n| /context | 显示上下文状态 |\n| /model | 显示模型信息 |`,
+    content: `**可用命令**\n\n| 命令 | 说明 |\n|------|------|\n| /help | 显示此帮助信息 |\n| /clear | 清空当前对话 |\n| /compact | 触发上下文压缩 |\n| /context | 显示上下文状态 |\n| /model | 显示模型信息 |`,
   })
 }
 
@@ -130,7 +131,7 @@ async function showModelInfo() {
   messages.value.push({
     id: Date.now(),
     role: 'assistant',
-    content: `🤖 **当前模型**: \`${modelName}\`\n\n**当前模式**: ${chatMode.value === 'aiops' ? '运维诊断' : '自由对话'}`,
+    content: `**当前模型**: \`${modelName}\`\n\n**当前模式**: ${chatMode.value === 'aiops' ? '运维诊断' : '自由对话'}`,
   })
 }
 
@@ -148,14 +149,40 @@ function handleSend(text: string): void {
   }
 }
 
+// ---------- 快捷动作 & 模式 ----------
+
+interface QuickAction {
+  icon: typeof Cpu
+  label: string
+  prompt: string
+}
+
+const quickActions: QuickAction[] = [
+  { icon: Cpu, label: '服务器 CPU/内存诊断', prompt: '查看当前服务器 CPU 和内存使用情况' },
+  { icon: ScrollText, label: '查看最近错误日志', prompt: '列出最近 10 条系统错误日志' },
+  { icon: HardDrive, label: 'df -h 磁盘水位查询', prompt: 'df -h 磁盘水位查询' },
+]
+
+interface ModeOption {
+  key: 'chat' | 'aiops'
+  icon: typeof MessageCircle
+  label: string
+}
+
+const modeOptions: ModeOption[] = [
+  { key: 'chat', icon: MessageCircle, label: '自由对话' },
+  { key: 'aiops', icon: Stethoscope, label: '运维诊断' },
+]
 </script>
 
 <template>
-  <div class="chat-workspace">
+  <section class="chat-workspace">
     <!-- Header -->
-    <div class="workspace-header">
+    <header class="workspace-header">
       <div class="header-info">
+        <span class="header-status-dot"></span>
         <span class="active-title">运维控制台</span>
+        <span class="title-divider"></span>
         <span class="model-badge">GoAgent Copilot</span>
       </div>
       <div class="header-actions">
@@ -165,86 +192,83 @@ function handleSend(text: string): void {
           :class="{ active: isMonitorOpen }"
           @click="emit('update:isMonitorOpen', !isMonitorOpen)"
         >
-          实时系统状态
+          <MonitorPlay :size="14" :stroke-width="2" />
+          <span>实时系统状态</span>
         </button>
       </div>
-    </div>
+    </header>
 
-    <!-- Messages：每条消息按 role 渲染，user 右对齐，其余左对齐 -->
+    <!-- Messages -->
     <div class="message-area" ref="msgArea">
-      <div
-        v-for="msg in messages"
-        :key="msg.id"
-        class="msg-item"
-      >
+      <div class="message-stream">
+        <div v-for="msg in messages" :key="msg.id" class="msg-item">
+          <!-- user / assistant → MessageBubble -->
+          <MessageBubble
+            v-if="msg.role === 'user' || msg.role === 'assistant'"
+            :message="msg"
+          />
 
+          <!-- thinking → ThinkingBlock -->
+          <ThinkingBlock
+            v-else-if="msg.role === 'thinking'"
+            :content="msg.content || ''"
+          />
 
+          <!-- tool_call → ToolCallBlock -->
+          <ToolCallBlock
+            v-else-if="msg.role === 'tool_call'"
+            :name="msg.name"
+            :args="msg.args"
+          />
 
-        <!-- user / assistant → MessageBubble（内部已有气泡区分）-->
-        <MessageBubble
-          v-if="msg.role === 'user' || msg.role === 'assistant'"
-          :message="msg"
-        />
+          <!-- tool_result → ToolResultBlock -->
+          <ToolResultBlock
+            v-else-if="msg.role === 'tool_result'"
+            :name="msg.name"
+            :result="msg.result"
+          />
 
-        <!-- thinking → ThinkingBlock -->
-        <ThinkingBlock
-          v-else-if="msg.role === 'thinking'"
-          :content="msg.content || ''"
-        />
+          <!-- permission_req → PermissionCard -->
+          <PermissionCard
+            v-else-if="msg.role === 'permission_req'"
+            :message="msg"
+            @respond="(approved: boolean, always: boolean) => respondPermission(msg, approved, always)"
+          />
+        </div>
 
-        <!-- tool_call → ToolCallBlock -->
-        <ToolCallBlock
-          v-else-if="msg.role === 'tool_call'"
-          :name="msg.name"
-          :args="msg.args"
-        />
-
-        <!-- tool_result → ToolResultBlock -->
-        <ToolResultBlock
-          v-else-if="msg.role === 'tool_result'"
-          :name="msg.name"
-          :result="msg.result"
-        />
-
-        <!-- permission_req → PermissionCard -->
-        <PermissionCard
-          v-else-if="msg.role === 'permission_req'"
-          :message="msg"
-          @respond="(approved: boolean, always: boolean) => respondPermission(msg, approved, always)"
-        />
+        <!-- AI 思考中 Loading -->
+        <LoadingCard v-if="isSending" />
       </div>
-
-      <!-- AI 思考中 Loading -->
-      <LoadingCard v-if="isSending" />
     </div>
 
-
-    <!-- Quick Actions -->
+    <!-- Input Section -->
     <div class="input-section">
+      <!-- Quick Actions -->
       <div class="quick-actions">
-        <button class="quick-btn" @click="triggerQuickAction('查看当前服务器 CPU 和内存使用情况')">
-          🖥️ 服务器 CPU/内存诊断
-        </button>
-        <button class="quick-btn" @click="triggerQuickAction('列出最近 10 条系统错误日志')">
-          📋 查看最近错误日志
-        </button>
-        <button class="quick-btn" @click="triggerQuickAction('df -h 磁盘水位查询')">
-          💾 df -h 磁盘水位查询
+        <button
+          v-for="action in quickActions"
+          :key="action.label"
+          class="quick-btn"
+          @click="triggerQuickAction(action.prompt)"
+        >
+          <component :is="action.icon" :size="13" :stroke-width="2" />
+          <span>{{ action.label }}</span>
         </button>
       </div>
 
       <!-- Mode Switch -->
       <div class="mode-switch-bar">
         <button
+          v-for="mode in modeOptions"
+          :key="mode.key"
           class="mode-btn"
-          :class="{ active: chatMode === 'chat' }"
-          @click="chatMode = 'chat'"
-        >💬 自由对话</button>
-        <button
-          class="mode-btn"
-          :class="{ active: chatMode === 'aiops' }"
-          @click="chatMode = 'aiops'"
-        >🩺 运维诊断</button>
+          :class="{ active: chatMode === mode.key }"
+          @click="chatMode = mode.key"
+        >
+          <component :is="mode.icon" :size="13" :stroke-width="2" />
+          <span>{{ mode.label }}</span>
+        </button>
+        <span class="mode-indicator" :class="{ right: chatMode === 'aiops' }"></span>
       </div>
 
       <!-- Input -->
@@ -255,7 +279,7 @@ function handleSend(text: string): void {
         @stop="abort"
       />
     </div>
-  </div>
+  </section>
 </template>
 
 <style scoped>
@@ -263,19 +287,23 @@ function handleSend(text: string): void {
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: var(--bg-body);
+  background: transparent;
   height: 100vh;
   position: relative;
+  min-width: 0;
 }
 
-/* Header */
+/* ---------- Header ---------- */
 .workspace-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 12px 20px;
-  border-bottom: 1px solid var(--border-color);
+  padding: 16px 28px;
+  border-bottom: 1px solid var(--border-hairline);
   background: var(--bg-secondary);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  flex-shrink: 0;
 }
 
 .header-info {
@@ -284,18 +312,38 @@ function handleSend(text: string): void {
   gap: 12px;
 }
 
+.header-status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-bright);
+  box-shadow: 0 0 10px var(--accent-glow);
+  position: relative;
+}
+
 .active-title {
-  font-size: 16px;
+  font-family: var(--font-display);
+  font-size: 1.02rem;
   font-weight: 600;
-  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  color: var(--text-heading);
+}
+
+.title-divider {
+  width: 1px;
+  height: 14px;
+  background: var(--border-input);
 }
 
 .model-badge {
-  font-size: 11px;
-  padding: 2px 8px;
-  border-radius: 10px;
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  padding: 3px 9px;
+  border-radius: var(--radius-pill);
   background: var(--bg-active);
   color: var(--text-secondary);
+  letter-spacing: 0.02em;
+  border: 1px solid var(--border-hairline);
 }
 
 .header-actions {
@@ -307,44 +355,72 @@ function handleSend(text: string): void {
 .monitor-toggle-btn {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  background: var(--bg-secondary);
+  gap: 7px;
+  padding: 7px 14px;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-pill);
+  background: var(--bg-elevated);
+  backdrop-filter: var(--glass-blur-lite);
+  -webkit-backdrop-filter: var(--glass-blur-lite);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 0.76rem;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--transition-spring);
 }
 
 .monitor-toggle-btn:hover {
   background: var(--bg-hover);
+  color: var(--text-primary);
+  transform: translateY(-1px);
+  border-color: var(--border-input);
 }
 
 .monitor-toggle-btn.active {
-  background: var(--accent);
-  color: white;
-  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  border-color: var(--border-focus);
+  box-shadow: 0 0 16px rgba(0, 255, 157, 0.15);
 }
 
-/* Message Area */
+/* ---------- Message Area ---------- */
 .message-area {
   flex: 1;
   overflow-y: auto;
-  padding: 20px;
+  padding: 28px;
 }
 
-/* 每条消息的外层容器 */
+.message-stream {
+  max-width: 920px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
 .msg-item {
-  margin-bottom: 12px;
+  animation: msg-enter 0.42s var(--ease-out-expo) both;
 }
 
-/* Input Section */
+@keyframes msg-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ---------- Input Section ---------- */
 .input-section {
-  padding: 16px 20px;
-  border-top: 1px solid var(--border-color);
+  padding: 14px 28px 22px;
   background: var(--bg-secondary);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-top: 1px solid var(--border-hairline);
+  flex-shrink: 0;
 }
 
 .quick-actions {
@@ -352,53 +428,88 @@ function handleSend(text: string): void {
   gap: 8px;
   margin-bottom: 12px;
   flex-wrap: wrap;
+  max-width: 920px;
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .quick-btn {
-  padding: 6px 12px;
-  border: 1px solid var(--border-color);
-  border-radius: 16px;
-  background: var(--bg-secondary);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 13px;
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-pill);
+  background: var(--bg-elevated);
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 0.74rem;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: all var(--transition-spring);
 }
 
 .quick-btn:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  border-color: var(--border-focus);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
 }
 
+.quick-btn:active {
+  transform: translateY(0);
+}
+
+/* ---------- Mode Switch ---------- */
 .mode-switch-bar {
   display: flex;
-  gap: 4px;
-  margin-bottom: 12px;
-  background: var(--bg-body);
+  gap: 2px;
+  margin: 0 auto 12px;
+  background: var(--bg-input);
   padding: 4px;
-  border-radius: 8px;
+  border-radius: var(--radius-pill);
+  position: relative;
+  max-width: 920px;
+  border: 1px solid var(--border-hairline);
 }
 
 .mode-btn {
   flex: 1;
-  padding: 6px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 12px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text-secondary);
-  font-size: 12px;
+  font-size: 0.78rem;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.2s;
-}
-
-.mode-btn:hover {
-  background: var(--bg-hover);
+  transition: color var(--transition-normal);
+  position: relative;
+  z-index: 2;
 }
 
 .mode-btn.active {
-  background: var(--accent);
-  color: #fff;
-  font-weight: 600;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.15);
+  color: var(--text-heading);
+}
+
+.mode-indicator {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+  width: calc(50% - 4px);
+  height: calc(100% - 8px);
+  background: var(--accent-gradient);
+  border-radius: var(--radius-pill);
+  box-shadow: 0 2px 12px var(--accent-glow);
+  transition: transform var(--transition-spring);
+  z-index: 1;
+}
+
+.mode-indicator.right {
+  transform: translateX(100%);
 }
 </style>

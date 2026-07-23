@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 	"log"
 
 	"github.com/cloudwego/eino/schema"
+	"github.com/google/uuid"
 )
 
 type ConversationMeta struct {
@@ -21,6 +23,7 @@ type ConversationMeta struct {
 
 type ConversationStore struct {
 	dir string
+	mu  sync.Mutex // 保护同一会话文件的并发读写，避免 JSONL 行交错
 }
 
 type messageLine struct {
@@ -63,11 +66,15 @@ func (s *ConversationStore) metaPath(sessionID, conversationID string) string {
 
 // CreateConversation 创建新对话，返回 conversationID
 func (s *ConversationStore) CreateConversation(sessionID, title string) (*ConversationMeta, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if err := os.MkdirAll(s.sessionDir(sessionID), 0755); err != nil {
 		return nil, fmt.Errorf("create session dir: %w", err)
 	}
 
-	id := fmt.Sprintf("conv_%d", time.Now().UnixMilli())
+	// 用 uuid 避免同一毫秒内创建多个对话时 ID 冲突（此前 conv_<UnixMilli> 会碰撞覆盖）
+	id := "conv_" + uuid.New().String()
 	now := time.Now().Format(time.RFC3339)
 
 	meta := &ConversationMeta{
@@ -85,6 +92,9 @@ func (s *ConversationStore) CreateConversation(sessionID, title string) (*Conver
 
 // ListConversations 返回指定 session 的所有对话元数据，按更新时间倒序
 func (s *ConversationStore) ListConversations(sessionID string) ([]*ConversationMeta, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	dir := s.sessionDir(sessionID)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -125,6 +135,9 @@ func (s *ConversationStore) ListConversations(sessionID string) ([]*Conversation
 
 // LoadHistory 加载指定对话的历史消息
 func (s *ConversationStore) LoadHistory(sessionID, conversationID string) ([]*schema.Message, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	f, err := os.Open(s.filePath(sessionID, conversationID))
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -167,6 +180,9 @@ func (s *ConversationStore) LoadHistory(sessionID, conversationID string) ([]*sc
 
 // SaveMessages 保存消息到指定对话
 func (s *ConversationStore) SaveMessages(sessionID, conversationID string, msgs ...*schema.Message) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if err := os.MkdirAll(s.sessionDir(sessionID), 0755); err != nil {
 		return fmt.Errorf("create session dir: %w", err)
 	}
@@ -216,6 +232,9 @@ func (s *ConversationStore) SaveMessages(sessionID, conversationID string, msgs 
 
 // DeleteConversation 删除对话及其元数据
 func (s *ConversationStore) DeleteConversation(sessionID, conversationID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	os.Remove(s.filePath(sessionID, conversationID))
 	os.Remove(s.metaPath(sessionID, conversationID))
 	return nil

@@ -1,4 +1,4 @@
-﻿<script lang="ts">
+<script lang="ts">
 export default { name: 'DashboardView' }
 </script>
 
@@ -55,13 +55,13 @@ async function fetchMetrics() {
     }
     data.value = json
     error.value = ''
-    
+
     // 更新历史数据
     history.value.push(JSON.parse(JSON.stringify(json)))
     if (history.value.length > 20) {
       history.value.shift()
     }
-    
+
     // 动态校验支持的折线选项
     availableLineMetrics.value = lineMetricsList.filter(m => {
       if (!m.check) return true
@@ -173,11 +173,11 @@ function drawLineAtPoints(ctx: CanvasRenderingContext2D, points: Point[], width:
 
   const paddingTop = 20
   const paddingBottom = 30
-  const accentColor = getThemeColor('--accent', '#10a37f')
+  const accentColor = getThemeColor('--accent-bright', '#00ff9d')
 
   // 渐变填充区域
   const gradient = ctx.createLinearGradient(0, paddingTop, 0, height - paddingBottom)
-  gradient.addColorStop(0, hexToRgbA(accentColor, 0.25))
+  gradient.addColorStop(0, hexToRgbA(accentColor, 0.32))
   gradient.addColorStop(1, hexToRgbA(accentColor, 0.0))
 
   ctx.beginPath()
@@ -198,12 +198,15 @@ function drawLineAtPoints(ctx: CanvasRenderingContext2D, points: Point[], width:
   }
   ctx.strokeStyle = accentColor
   ctx.lineWidth = 2.5
+  ctx.shadowColor = accentColor
+  ctx.shadowBlur = 12
   ctx.stroke()
+  ctx.shadowBlur = 0
 
   // 实心焦点
   const lastP = points[points.length - 1]
   ctx.beginPath()
-  ctx.arc(lastP.x, lastP.y, 4, 0, 2 * Math.PI)
+  ctx.arc(lastP.x, lastP.y, 5, 0, 2 * Math.PI)
   ctx.fillStyle = accentColor
   ctx.fill()
   ctx.strokeStyle = '#fff'
@@ -299,9 +302,9 @@ function drawPieChart() {
   const memTotal = activeData.mem_total_gb ?? 8.0
   const memUsed = activeData.mem_used_gb ?? 3.5
   const memFree = Math.max(0, memTotal - memUsed)
-  
+
   const segments = [
-    { label: '物理内存已用', value: memUsed, color: '#10a37f' },
+    { label: '物理内存已用', value: memUsed, color: '#00ff9d' },
     { label: '物理内存空闲', value: memFree, color: getThemeColor('--border-color', 'rgba(0, 0, 0, 0.1)') }
   ]
 
@@ -309,7 +312,7 @@ function drawPieChart() {
   if (activeData.swap_use != null) {
     const swapTotal = 2.0 // Mock swap total size
     const swapUsed = (activeData.swap_use / 100) * swapTotal
-    segments.push({ label: 'Swap 虚拟内存已用', value: swapUsed, color: '#ff9f40' })
+    segments.push({ label: 'Swap 虚拟内存已用', value: swapUsed, color: '#ffb454' })
   }
 
   const totalVal = segments.reduce((sum, s) => sum + s.value, 0)
@@ -322,20 +325,20 @@ function drawPieChart() {
   // 1. 绘制扇区
   for (const seg of segments) {
     const sliceAngle = (seg.value / totalVal) * (2 * Math.PI)
-    
+
     ctx.beginPath()
     ctx.arc(centerX, centerY, radius, startAngle, startAngle + sliceAngle)
     ctx.lineTo(centerX, centerY)
     ctx.fillStyle = seg.color
     ctx.fill()
-    
+
     startAngle += sliceAngle
   }
 
   // 2. 绘制中心孔洞 (Donut 环形设计)
   ctx.beginPath()
   ctx.arc(centerX, centerY, radius * 0.6, 0, 2 * Math.PI)
-  ctx.fillStyle = getThemeColor('--bg-sidebar-sub', '#ffffff')
+  ctx.fillStyle = getThemeColor('--bg-sidebar-sub', '#0a0a10')
   ctx.fill()
 
   // 3. 环形中心文字
@@ -343,7 +346,7 @@ function drawPieChart() {
   ctx.font = 'bold 11px sans-serif'
   ctx.textAlign = 'center'
   ctx.fillText('物理总内存', centerX, centerY - 5)
-  ctx.fillStyle = getThemeColor('--text-primary', '#e5e5eb')
+  ctx.fillStyle = getThemeColor('--text-primary', '#ecedf2')
   ctx.font = 'bold 13px monospace'
   ctx.fillText(`${memTotal.toFixed(1)} GB`, centerX, centerY + 10)
 
@@ -361,7 +364,7 @@ function drawPieChart() {
     ctx.fill()
 
     // 标签文字
-    ctx.fillStyle = getThemeColor('--text-primary', '#e5e5eb')
+    ctx.fillStyle = getThemeColor('--text-primary', '#ecedf2')
     ctx.font = 'bold 11px sans-serif'
     ctx.fillText(`${seg.label}`, legendX, legendY)
 
@@ -433,7 +436,10 @@ watch(() => props.view, () => {
     <!-- Header -->
     <header class="dashboard-header">
       <div class="header-left">
-        <h2 class="title"><BarChart3 :size="20" style="vertical-align: middle; margin-right: 6px;" />系统核心监控指标</h2>
+        <h2 class="title">
+          <span class="title-icon"><BarChart3 :size="20" :stroke-width="1.8" /></span>
+          系统核心监控指标
+        </h2>
         <p class="subtitle">通过 Prometheus 实时采集的主机物理及虚拟指标诊断中心</p>
       </div>
       <div class="header-right">
@@ -453,6 +459,7 @@ watch(() => props.view, () => {
       <div class="metrics-grid" v-if="data && (view === 'overview' || !view)">
         <!-- CPU Card -->
         <div class="grid-card accent">
+          <div class="card-accent-ring"></div>
           <div class="card-head">
             <span>CPU 使用率</span>
             <span class="badge">CPU</span>
@@ -558,10 +565,10 @@ watch(() => props.view, () => {
             <span class="badge red">OOM</span>
           </div>
           <div class="card-body">
-            <h3 class="metric-val-large" :style="{ color: data.oom_kills_1h > 0 ? '#e53e3e' : 'inherit' }">
+            <h3 class="metric-val-large" :style="{ color: data.oom_kills_1h > 0 ? '#ff5a6e' : 'inherit' }">
               {{ data.oom_kills_1h.toFixed(0) }} <span class="unit">次</span>
             </h3>
-            <p class="sub-desc" :style="{ color: data.oom_kills_1h > 0 ? '#e53e3e' : 'inherit', fontWeight: data.oom_kills_1h > 0 ? 'bold' : 'normal' }">
+            <p class="sub-desc" :style="{ color: data.oom_kills_1h > 0 ? '#ff5a6e' : 'inherit', fontWeight: data.oom_kills_1h > 0 ? 'bold' : 'normal' }">
               {{ data.oom_kills_1h > 0 ? '警告: 系统检测到 OOM Kills!' : '内核未发生内存溢出强杀' }}
             </p>
           </div>
@@ -573,7 +580,7 @@ watch(() => props.view, () => {
         <!-- 核心折线趋势 Canvas -->
         <div class="chart-box main-trend" v-show="view !== 'pie'">
           <div class="chart-head-selector">
-            <span class="chart-box-title"><TrendingUp :size="16" style="vertical-align: middle; margin-right: 4px;" />实时指标波动历史折线 (最近 20 点)</span>
+            <span class="chart-box-title"><TrendingUp :size="15" :stroke-width="2" />实时指标波动历史折线 (最近 20 点)</span>
             <select v-model="selectedLineMetric" class="metric-selector-dropdown">
               <option v-for="m in availableLineMetrics" :key="m.key" :value="m.key">
                 {{ m.label }}
@@ -587,7 +594,7 @@ watch(() => props.view, () => {
 
         <!-- 内存分配 Donut Canvas -->
         <div class="chart-box memory-pie" v-show="view !== 'line'">
-          <span class="chart-box-title"><PieChart :size="16" style="vertical-align: middle; margin-right: 4px;" />内存分配比例分析饼图</span>
+          <span class="chart-box-title"><PieChart :size="15" :stroke-width="2" />内存分配比例分析饼图</span>
           <div class="canvas-wrapper">
             <canvas ref="pieCanvas"></canvas>
           </div>
@@ -602,48 +609,66 @@ watch(() => props.view, () => {
   flex: 1;
   display: flex;
   flex-direction: column;
-  background: var(--bg-body);
+  background: transparent;
   height: 100vh;
   overflow: hidden;
 }
 
 .dashboard-header {
-  padding: 24px 40px;
-  border-bottom: 1px solid var(--border-color);
+  padding: 26px 40px;
+  border-bottom: 1px solid var(--border-hairline);
   display: flex;
   justify-content: space-between;
   align-items: center;
   flex-shrink: 0;
+  background: var(--bg-secondary);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
 }
 
 .dashboard-header .title {
-  font-size: 1.25rem;
-  font-weight: 700;
-  color: var(--text-heading, #1d1d1f);
-  margin: 0 0 4px 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-display);
+  font-size: 1.35rem;
+  font-weight: 600;
+  color: var(--text-heading);
+  margin: 0 0 6px 0;
+  letter-spacing: -0.025em;
+}
+
+.title-icon {
+  display: flex;
+  color: var(--accent-bright);
+  filter: drop-shadow(0 0 12px var(--accent-glow));
 }
 
 .dashboard-header .subtitle {
   font-size: 0.8rem;
-  color: var(--text-muted, #86868b);
+  color: var(--text-muted);
   margin: 0;
+  letter-spacing: 0.01em;
 }
 
 .header-right {
   display: flex;
   align-items: center;
-  gap: 8px;
-  background: var(--bg-sidebar-mini);
-  padding: 8px 16px;
-  border-radius: var(--radius-lg, 12px);
-  border: 1px solid var(--border-color);
+  gap: 9px;
+  background: var(--bg-elevated);
+  padding: 9px 16px;
+  border-radius: var(--radius-pill);
+  border: 1px solid var(--border-glass);
+  backdrop-filter: var(--glass-blur-lite);
+  -webkit-backdrop-filter: var(--glass-blur-lite);
 }
 
 .pulse-indicator {
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background: #10a37f;
+  background: var(--accent-bright);
+  box-shadow: 0 0 8px var(--accent-glow);
 }
 
 .pulse-indicator.loading {
@@ -651,80 +676,119 @@ watch(() => props.view, () => {
 }
 
 @keyframes pulse-glow {
-  0% { transform: scale(1); opacity: 0.5; }
-  100% { transform: scale(1.3); opacity: 1; }
+  0% {
+    transform: scale(1);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(1.3);
+    opacity: 1;
+  }
 }
 
 .status-label {
   font-size: 0.72rem;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-primary);
 }
 
 .dashboard-scrollable-content {
   flex: 1;
-  padding: 24px 40px 40px 40px;
+  padding: 28px 40px 40px 40px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 24px;
+  gap: 26px;
 }
 
 .error-banner {
-  background: rgba(229, 62, 62, 0.08);
-  border: 1px solid rgba(229, 62, 62, 0.2);
-  border-radius: var(--radius-md, 8px);
-  padding: 12px 16px;
+  background: rgba(255, 90, 110, 0.08);
+  border: 1px solid rgba(255, 90, 110, 0.25);
+  border-radius: var(--radius-lg);
+  padding: 13px 17px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
+  backdrop-filter: var(--glass-blur-lite);
+  -webkit-backdrop-filter: var(--glass-blur-lite);
 }
 
 .banner-icon {
   display: flex;
-  align-items: center;
-  color: #e53e3e;
+  color: var(--text-error);
   flex-shrink: 0;
 }
 
 .banner-text {
   font-size: 0.82rem;
-  color: #e53e3e;
+  color: var(--text-error);
   font-weight: 500;
 }
 
 /* 核心指标九宫格 Grid */
 .metrics-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
   gap: 16px;
   flex-shrink: 0;
 }
 
 .grid-card {
-  background: var(--bg-sidebar-sub, #ffffff);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg, 12px);
-  padding: 16px;
+  position: relative;
+  background: var(--bg-elevated);
+  backdrop-filter: var(--glass-blur-lite);
+  -webkit-backdrop-filter: var(--glass-blur-lite);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-xl);
+  padding: 18px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
   box-shadow: var(--shadow-sm);
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: transform var(--transition-spring), box-shadow var(--transition-normal),
+    border-color var(--transition-normal);
+  overflow: hidden;
+}
+
+.grid-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--aurora-1);
+  opacity: 0;
+  transition: opacity var(--transition-normal);
+  pointer-events: none;
 }
 
 .grid-card:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--shadow-md);
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--border-input);
+}
+
+.grid-card:hover::before {
+  opacity: 1;
 }
 
 .grid-card.accent {
-  border-color: rgba(16, 163, 127, 0.4);
+  border-color: var(--border-focus);
+}
+
+.grid-card.accent .card-accent-ring {
+  position: absolute;
+  top: -40%;
+  right: -40%;
+  width: 80%;
+  height: 80%;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--accent-glow) 0%, transparent 60%);
+  opacity: 0.6;
+  pointer-events: none;
 }
 
 .grid-card.danger {
-  border-color: rgba(229, 62, 62, 0.4);
-  background: rgba(229, 62, 62, 0.02);
+  border-color: rgba(255, 90, 110, 0.4);
+  background: rgba(255, 90, 110, 0.04);
 }
 
 .card-head {
@@ -734,73 +798,87 @@ watch(() => props.view, () => {
   font-size: 0.78rem;
   font-weight: 600;
   color: var(--text-secondary);
+  position: relative;
+  z-index: 1;
 }
 
 .badge {
-  font-size: 0.6rem;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm, 4px);
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  padding: 3px 8px;
+  border-radius: var(--radius-pill);
   font-weight: 700;
   color: #fff;
-  background: var(--accent, #10a37f);
+  background: var(--accent-gradient);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
 }
 
 .badge.gray {
   background: var(--text-muted);
 }
 .badge.orange {
-  background: #ff9f40;
+  background: var(--signal-amber);
 }
 .badge.blue {
-  background: #3182ce;
+  background: var(--signal-blue);
 }
 .badge.cyan {
-  background: #00b5d8;
+  background: var(--signal-cyan);
 }
 .badge.purple {
-  background: #805ad5;
+  background: var(--signal-violet);
 }
 .badge.red {
-  background: #e53e3e;
+  background: var(--signal-rose);
+}
+
+.card-body {
+  position: relative;
+  z-index: 1;
 }
 
 .metric-val-large {
-  font-size: 1.6rem;
+  font-size: 1.8rem;
   font-weight: 700;
   margin: 0;
-  font-family: monospace;
-  color: var(--text-main);
+  font-family: var(--font-display);
+  color: var(--text-heading);
+  letter-spacing: -0.03em;
+  line-height: 1;
 }
 
 .metric-val-large .unit {
-  font-size: 0.88rem;
+  font-size: 0.9rem;
   font-weight: 600;
   color: var(--text-secondary);
   margin-left: 2px;
 }
 
 .sub-desc {
-  font-size: 0.68rem;
+  font-size: 0.7rem;
   color: var(--text-muted);
-  margin: 4px 0 0 0;
+  margin: 6px 0 0 0;
+  font-family: var(--font-mono);
 }
 
 .dashboard-mini-bar {
   width: 100%;
-  height: 4px;
-  background: var(--bg-sidebar-mini);
-  border-radius: 2px;
+  height: 5px;
+  background: var(--bg-active);
+  border-radius: var(--radius-pill);
   overflow: hidden;
-  margin-top: 8px;
+  margin-top: 10px;
 }
 
 .bar-fill {
   height: 100%;
-  background: var(--accent);
-  border-radius: 2px;
+  background: var(--accent-gradient);
+  border-radius: var(--radius-pill);
+  transition: width 0.5s var(--ease-out-expo);
 }
 .bar-fill.warning {
-  background: #e53e3e;
+  background: linear-gradient(90deg, var(--text-warning), var(--text-error));
 }
 
 /* 两个大图表排列容器 */
@@ -808,14 +886,16 @@ watch(() => props.view, () => {
   display: flex;
   gap: 20px;
   flex: 1;
-  min-height: 280px;
+  min-height: 300px;
 }
 
 .chart-box {
-  background: var(--bg-sidebar-sub, #ffffff);
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-lg, 12px);
-  padding: 20px;
+  background: var(--bg-elevated);
+  backdrop-filter: var(--glass-blur-lite);
+  -webkit-backdrop-filter: var(--glass-blur-lite);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-xl);
+  padding: 22px;
   box-shadow: var(--shadow-sm);
   display: flex;
   flex-direction: column;
@@ -830,33 +910,39 @@ watch(() => props.view, () => {
 }
 
 .chart-box-title {
-  font-size: 0.82rem;
-  font-weight: 700;
-  color: var(--text-main);
-  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--font-display);
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text-heading);
+  margin-bottom: 14px;
+  letter-spacing: -0.01em;
 }
 
 .chart-head-selector {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .metric-selector-dropdown {
   background: var(--bg-input);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-glass);
   color: var(--text-primary);
-  padding: 6px 12px;
+  padding: 7px 12px;
   border-radius: var(--radius-md);
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-size: 0.74rem;
+  font-weight: 500;
   cursor: pointer;
   outline: none;
+  transition: border-color var(--transition-fast);
 }
 
 .metric-selector-dropdown:focus {
-  border-color: var(--accent);
+  border-color: var(--border-focus);
 }
 
 .canvas-wrapper {

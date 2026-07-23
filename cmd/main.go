@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/LennyFace24/MiniAgent/internal/config"
@@ -13,12 +14,9 @@ import (
 )
 
 func main() {
-	cfg := config.LoadConfig("config.yaml")
-	if cfg == nil {
-		panic("加载配置文件失败")
-	}
-	if cfg.Session.SecretKey == "" {
-		panic("session.secret_key 不能为空")
+	cfg, err := config.LoadConfig("config.yaml")
+	if err != nil {
+		log.Fatalf("加载配置失败: %v", err)
 	}
 
 	contexttool.GetContextState().ConfigureMaxTokens(cfg.ContextBudgetTokens())

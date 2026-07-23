@@ -1,7 +1,18 @@
-﻿<script setup lang="ts">
+<script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useConversations } from '../composables/useConversations'
-import { MessageSquare, BarChart3, TrendingUp, PieChart, Upload, FileText } from 'lucide-vue-next'
+import {
+  MessageSquare,
+  BarChart3,
+  TrendingUp,
+  PieChart,
+  Upload,
+  FileText,
+  Plus,
+  X,
+  Search,
+  Layers,
+} from 'lucide-vue-next'
 
 const props = defineProps<{
   activeNav: string
@@ -57,7 +68,7 @@ function handleFileSelect(e: Event) {
 function uploadFile(file: File) {
   isUploading.value = true
   uploadProgress.value = 10
-  
+
   const interval = setInterval(() => {
     uploadProgress.value += 15
     if (uploadProgress.value >= 100) {
@@ -78,13 +89,14 @@ watch(() => props.activeNav, () => {
 </script>
 
 <template>
-  <div class="sub-sidebar">
+  <aside class="sub-sidebar">
     <!-- 头部搜索与操作 -->
     <div class="header-search" v-if="activeNav !== 'dashboard'">
-      <input 
+      <Search class="search-glyph" :size="14" :stroke-width="2" />
+      <input
         v-model="searchQuery"
-        type="text" 
-        :placeholder="activeNav === 'rag' ? '搜索本地文档...' : '搜索对话历史...'" 
+        type="text"
+        :placeholder="activeNav === 'rag' ? '搜索本地文档...' : '搜索对话历史...'"
         class="search-input"
       />
     </div>
@@ -92,21 +104,26 @@ watch(() => props.activeNav, () => {
     <!-- 对话列表 -->
     <div v-if="activeNav === 'chat' || activeNav === 'aiops'" class="sidebar-list">
       <div class="list-title">
-        <span>会话列表</span>
-        <button class="new-btn" @click="handleCreate" title="新建会话">+</button>
+        <span class="title-label">会话</span>
+        <span class="title-count">{{ conversations.length }}</span>
+        <button class="new-btn" @click="handleCreate" title="新建会话">
+          <Plus :size="16" :stroke-width="2.2" />
+        </button>
       </div>
-      
+
       <div class="items-container">
-        <div 
-          v-for="conv in conversations" 
+        <div
+          v-for="conv in conversations"
           :key="conv.id"
           class="conv-item"
           :class="{ active: activeId === conv.id }"
           @click="emit('select', conv.id)"
         >
-          <MessageSquare class="item-icon" :size="16" />
+          <span class="item-glyph"><MessageSquare :size="14" :stroke-width="1.8" /></span>
           <span class="item-title">{{ conv.title }}</span>
-          <button class="delete-item-btn" @click="handleDelete(conv.id, $event)">×</button>
+          <button class="delete-item-btn" @click="handleDelete(conv.id, $event)" title="删除">
+            <X :size="13" :stroke-width="2.2" />
+          </button>
         </div>
       </div>
     </div>
@@ -114,7 +131,7 @@ watch(() => props.activeNav, () => {
     <!-- 指标仪表盘模式 (Dashboard) -->
     <div v-else-if="activeNav === 'dashboard'" class="sidebar-list">
       <div class="list-title">
-        <span>监控菜单</span>
+        <span class="title-label">监控</span>
       </div>
       <div class="items-container">
         <div
@@ -122,7 +139,7 @@ watch(() => props.activeNav, () => {
           :class="{ active: (dashboardView ?? 'overview') === 'overview' }"
           @click="emit('dashboard-view', 'overview')"
         >
-          <BarChart3 class="item-icon" :size="16" />
+          <span class="item-glyph"><BarChart3 :size="14" :stroke-width="1.8" /></span>
           <span class="item-title">核心指标监控</span>
         </div>
         <div
@@ -130,7 +147,7 @@ watch(() => props.activeNav, () => {
           :class="{ active: dashboardView === 'line' }"
           @click="emit('dashboard-view', 'line')"
         >
-          <TrendingUp class="item-icon" :size="16" />
+          <span class="item-glyph"><TrendingUp :size="14" :stroke-width="1.8" /></span>
           <span class="item-title">实时趋势折线</span>
         </div>
         <div
@@ -138,7 +155,7 @@ watch(() => props.activeNav, () => {
           :class="{ active: dashboardView === 'pie' }"
           @click="emit('dashboard-view', 'pie')"
         >
-          <PieChart class="item-icon" :size="16" />
+          <span class="item-glyph"><PieChart :size="14" :stroke-width="1.8" /></span>
           <span class="item-title">资源配比饼图</span>
         </div>
       </div>
@@ -147,21 +164,17 @@ watch(() => props.activeNav, () => {
     <!-- 本地知识库模式 (RAG) -->
     <div v-else-if="activeNav === 'rag'" class="sidebar-list">
       <div class="list-title">
-        <span>知识手册</span>
+        <span class="title-label">知识手册</span>
       </div>
-      
+
       <!-- 拖拽上传框 -->
-      <div 
-        class="upload-box"
-        @dragover.prevent
-        @drop="handleDrop"
-      >
+      <div class="upload-box" @dragover.prevent @drop="handleDrop">
         <div v-if="!isUploading" class="upload-inner">
-          <Upload class="upload-icon" :size="28" />
+          <Upload class="upload-icon" :size="26" :stroke-width="1.6" />
           <span class="upload-text">拖拽文件或点击上传</span>
-          <input 
-            type="file" 
-            class="file-input-hidden" 
+          <input
+            type="file"
+            class="file-input-hidden"
             @change="handleFileSelect"
             accept=".txt,.md,.pdf,.json"
           />
@@ -175,120 +188,186 @@ watch(() => props.activeNav, () => {
       </div>
 
       <!-- 已上传文档列表 -->
-      <div class="docs-list-title">已同步手册 ({{ docsList.length }})</div>
+      <div class="docs-list-title">
+        <Layers :size="11" :stroke-width="2" />
+        <span>已同步手册</span>
+        <span class="docs-count">{{ docsList.length }}</span>
+      </div>
       <div class="docs-container">
         <div v-for="doc in docsList" :key="doc" class="doc-item">
-          <FileText class="doc-icon" :size="16" />
+          <FileText class="doc-icon" :size="14" :stroke-width="1.8" />
           <span class="doc-name">{{ doc }}</span>
           <span class="doc-badge">已向量化</span>
         </div>
       </div>
     </div>
-  </div>
+  </aside>
 </template>
 
 <style scoped>
 .sub-sidebar {
   width: var(--sidebar-sub-w);
   background: var(--bg-sidebar-sub);
-  border-right: 1px solid var(--border-color);
+  backdrop-filter: var(--glass-blur);
+  -webkit-backdrop-filter: var(--glass-blur);
+  border-right: 1px solid var(--border-glass);
   display: flex;
   flex-direction: column;
   height: 100vh;
   flex-shrink: 0;
 }
 
+/* ---------- 搜索框 ---------- */
 .header-search {
-  padding: 16px;
-  border-bottom: 1px solid var(--border-color);
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--border-hairline);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.search-glyph {
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: color var(--transition-fast);
 }
 
 .search-input {
-  width: 100%;
-  padding: 8px 12px;
-  background: var(--bg-input);
-  border: 1px solid var(--border-input);
-  border-radius: var(--radius-md);
+  flex: 1;
+  background: transparent;
+  border: none;
   color: var(--text-primary);
-  font-size: 0.8rem;
-  transition: var(--transition-fast);
-}
-
-.search-input:focus {
+  font-size: 0.82rem;
+  font-family: var(--font-sans);
+  letter-spacing: -0.01em;
   outline: none;
-  border-color: var(--accent);
 }
 
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.header-search:focus-within .search-glyph {
+  color: var(--accent-bright);
+}
+
+/* ---------- 列表 ---------- */
 .sidebar-list {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 16px;
+  padding: 18px;
   overflow-y: auto;
 }
 
 .list-title {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  font-size: 0.72rem;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: 0.7rem;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.18em;
   color: var(--text-muted);
-  font-weight: 700;
-  margin-bottom: 12px;
+  font-weight: 600;
+  margin-bottom: 14px;
+}
+
+.title-label {
+  flex: 1;
+}
+
+.title-count {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  background: var(--bg-active);
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  letter-spacing: 0;
 }
 
 .new-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
-  border: none;
+  border: 1px solid var(--border-glass);
   color: var(--text-secondary);
-  font-size: 1.2rem;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  line-height: 1;
+  transition: all var(--transition-spring);
 }
 
 .new-btn:hover {
-  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--border-focus);
+  color: var(--accent-bright);
+  transform: rotate(90deg) scale(1.05);
 }
 
 .items-container {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .conv-item {
   display: flex;
   align-items: center;
+  gap: 10px;
   padding: 10px 12px;
   border-radius: var(--radius-md);
   cursor: pointer;
-  transition: var(--transition-fast);
+  transition: background var(--transition-fast), color var(--transition-fast),
+    transform var(--transition-spring);
   color: var(--text-secondary);
   position: relative;
+  border: 1px solid transparent;
 }
 
 .conv-item:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+  transform: translateX(2px);
 }
 
 .conv-item.active {
-  background: var(--bg-active);
-  color: var(--accent);
-  font-weight: 500;
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  border-color: var(--border-focus);
 }
 
-.item-icon {
-  margin-right: 8px;
+.conv-item.active::before {
+  content: '';
+  position: absolute;
+  left: -18px;
+  top: 50%;
+  width: 3px;
+  height: 60%;
+  background: var(--accent-gradient);
+  border-radius: var(--radius-pill);
+  box-shadow: 0 0 8px var(--accent-glow);
+  transform: translateY(-50%);
+}
+
+.item-glyph {
   display: flex;
   align-items: center;
   flex-shrink: 0;
+  opacity: 0.7;
+}
+
+.conv-item.active .item-glyph {
+  opacity: 1;
 }
 
 .item-title {
   font-size: 0.82rem;
+  font-weight: 450;
+  letter-spacing: -0.005em;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -296,98 +375,142 @@ watch(() => props.activeNav, () => {
 }
 
 .delete-item-btn {
-  display: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: transparent;
   border: none;
   color: var(--text-muted);
-  font-size: 1rem;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all var(--transition-spring);
 }
 
 .conv-item:hover .delete-item-btn {
-  display: block;
+  opacity: 1;
+  transform: scale(1);
 }
 
 .delete-item-btn:hover {
   color: var(--text-error);
+  background: rgba(255, 90, 110, 0.1);
 }
 
-/* 知识库上传框 */
+/* ---------- 知识库上传 ---------- */
 .upload-box {
-  border: 2px dashed var(--border-color);
+  border: 1.5px dashed var(--border-input);
   border-radius: var(--radius-lg);
-  padding: 20px;
+  padding: 24px 16px;
   text-align: center;
   cursor: pointer;
-  transition: var(--transition-fast);
+  transition: all var(--transition-normal);
   background: var(--bg-input);
-  margin-bottom: 20px;
+  margin-bottom: 22px;
+  position: relative;
+  overflow: hidden;
+}
+
+.upload-box::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: var(--aurora-1);
+  opacity: 0;
+  transition: opacity var(--transition-normal);
+  pointer-events: none;
 }
 
 .upload-box:hover {
-  border-color: var(--accent);
+  border-color: var(--accent-bright);
+  transform: translateY(-2px);
+}
+
+.upload-box:hover::before {
+  opacity: 1;
 }
 
 .upload-inner {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 8px;
   position: relative;
 }
 
 .file-input-hidden {
   position: absolute;
-  top: 0; left: 0; width: 100%; height: 100%;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   opacity: 0;
   cursor: pointer;
 }
 
 .upload-icon {
-  margin-bottom: 8px;
   display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-secondary);
+  color: var(--accent-bright);
 }
 
 .upload-text {
-  font-size: 0.72rem;
+  font-size: 0.74rem;
   color: var(--text-secondary);
+  letter-spacing: 0.01em;
 }
 
 .progress-container {
   display: flex;
   flex-direction: column;
   align-items: center;
+  gap: 8px;
+  position: relative;
 }
 
 .progress-bar-bg {
   width: 100%;
-  height: 6px;
-  background: var(--border-color);
-  border-radius: 3px;
+  height: 4px;
+  background: var(--bg-active);
+  border-radius: var(--radius-pill);
   overflow: hidden;
-  margin-bottom: 8px;
 }
 
 .progress-bar-fill {
   height: 100%;
-  background: var(--accent);
+  background: var(--accent-gradient);
   width: 0%;
-  transition: width 0.1s ease;
+  transition: width 0.2s var(--ease-out-expo);
 }
 
 .progress-text {
   font-size: 0.68rem;
   color: var(--text-secondary);
+  font-family: var(--font-mono);
 }
 
-/* 知识库文档列表 */
+/* ---------- 文档列表 ---------- */
 .docs-list-title {
-  font-size: 0.7rem;
-  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
   color: var(--text-muted);
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+}
+
+.docs-count {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  background: var(--bg-active);
+  padding: 1px 7px;
+  border-radius: var(--radius-pill);
+  letter-spacing: 0;
 }
 
 .docs-container {
@@ -399,34 +522,41 @@ watch(() => props.activeNav, () => {
 .doc-item {
   display: flex;
   align-items: center;
-  padding: 8px;
+  gap: 10px;
+  padding: 9px 10px;
   background: var(--bg-input);
   border-radius: var(--radius-md);
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-hairline);
+  transition: all var(--transition-fast);
+}
+
+.doc-item:hover {
+  border-color: var(--border-glass);
+  transform: translateX(2px);
 }
 
 .doc-icon {
-  margin-right: 8px;
-  display: flex;
-  align-items: center;
   flex-shrink: 0;
   color: var(--text-secondary);
 }
 
 .doc-name {
-  font-size: 0.75rem;
+  font-size: 0.74rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
+  color: var(--text-primary);
 }
 
 .doc-badge {
-  font-size: 0.6rem;
-  background: var(--accent-dim);
-  color: var(--accent);
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-  zoom: 0.9;
+  font-size: 0.58rem;
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  letter-spacing: 0.04em;
+  font-weight: 600;
+  text-transform: uppercase;
 }
 </style>

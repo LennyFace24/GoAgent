@@ -3,6 +3,7 @@ package permission
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -68,11 +69,17 @@ type permissionRules struct {
 func loadPermissionConfig(path string) []Rule {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		panic("加载权限配置失败: " + err.Error())
+		// 权限配置缺失时降级为空规则（交由默认 ask 行为兜底），不 panic，
+		// 避免 NewPermissionManager 在测试或无配置环境下不可用。
+		if !os.IsNotExist(err) {
+			log.Printf("读取权限配置失败: %v", err)
+		}
+		return nil
 	}
 
 	var file permissionFile
 	if err := json.Unmarshal(data, &file); err != nil {
+		log.Printf("解析权限配置失败: %v", err)
 		return nil
 	}
 

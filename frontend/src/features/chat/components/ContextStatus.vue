@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { Gauge } from 'lucide-vue-next'
 
 interface ContextUsage {
   current_tokens: number
@@ -49,6 +50,12 @@ function formatTokens(tokens: number): string {
   return tokens.toString()
 }
 
+const barColor = computed(() => {
+  if (status.value === 'critical') return 'var(--text-error)'
+  if (status.value === 'warning') return 'var(--text-warning)'
+  return 'var(--accent-bright)'
+})
+
 onMounted(() => {
   fetchContextStatus()
   interval = setInterval(fetchContextStatus, 5000) // 每 5 秒刷新
@@ -63,13 +70,9 @@ onUnmounted(() => {
 
 <template>
   <div class="context-status" :class="status">
-    <div class="context-icon">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
-      </svg>
-    </div>
+    <span class="context-icon"><Gauge :size="13" :stroke-width="2" /></span>
     <div class="context-info">
-      <div class="context-percentage">{{ usage.percentage.toFixed(1) }}%</div>
+      <div class="context-percentage">{{ usage.percentage.toFixed(1) }}<span class="pct">%</span></div>
       <div class="context-detail">
         {{ formatTokens(usage.current_tokens) }} / {{ formatTokens(usage.max_tokens) }}
       </div>
@@ -77,7 +80,7 @@ onUnmounted(() => {
     <div class="context-bar">
       <div
         class="context-bar-fill"
-        :style="{ width: Math.min(usage.percentage, 100) + '%' }"
+        :style="{ width: Math.min(usage.percentage, 100) + '%', background: barColor }"
       />
     </div>
   </div>
@@ -87,81 +90,88 @@ onUnmounted(() => {
 .context-status {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
-  font-size: 0.75rem;
-  transition: all 0.2s;
+  gap: 9px;
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-glass);
+  backdrop-filter: var(--glass-blur-lite);
+  -webkit-backdrop-filter: var(--glass-blur-lite);
+  font-size: 0.72rem;
+  transition: all var(--transition-normal);
 }
 
 .context-status.warning {
-  border-color: var(--warning);
+  border-color: rgba(255, 180, 84, 0.4);
 }
 
 .context-status.critical {
-  border-color: var(--error);
+  border-color: rgba(255, 90, 110, 0.45);
+  box-shadow: 0 0 12px rgba(255, 90, 110, 0.18);
 }
 
 .context-icon {
+  display: flex;
   color: var(--text-muted);
   flex-shrink: 0;
+  transition: color var(--transition-fast);
 }
 
 .context-status.warning .context-icon {
-  color: var(--warning);
+  color: var(--text-warning);
 }
 
 .context-status.critical .context-icon {
-  color: var(--error);
+  color: var(--text-error);
 }
 
 .context-info {
-  flex: 1;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  line-height: 1.2;
 }
 
 .context-percentage {
+  font-family: var(--font-mono);
   font-weight: 600;
-  color: var(--text-primary);
+  font-size: 0.78rem;
+  color: var(--text-heading);
 }
 
 .context-status.warning .context-percentage {
-  color: var(--warning);
+  color: var(--text-warning);
 }
 
 .context-status.critical .context-percentage {
-  color: var(--error);
+  color: var(--text-error);
+}
+
+.pct {
+  font-size: 0.6em;
+  opacity: 0.7;
+  margin-left: 1px;
 }
 
 .context-detail {
   color: var(--text-muted);
-  font-size: 0.65rem;
+  font-size: 0.62rem;
+  font-family: var(--font-mono);
   white-space: nowrap;
 }
 
 .context-bar {
-  width: 60px;
+  width: 52px;
   height: 4px;
-  background: var(--bg-primary);
-  border-radius: 2px;
+  background: var(--bg-active);
+  border-radius: var(--radius-pill);
   overflow: hidden;
   flex-shrink: 0;
 }
 
 .context-bar-fill {
   height: 100%;
-  background: var(--accent);
-  border-radius: 2px;
-  transition: width 0.3s ease;
-}
-
-.context-status.warning .context-bar-fill {
-  background: var(--warning);
-}
-
-.context-status.critical .context-bar-fill {
-  background: var(--error);
+  border-radius: var(--radius-pill);
+  transition: width 0.5s var(--ease-out-expo);
 }
 </style>

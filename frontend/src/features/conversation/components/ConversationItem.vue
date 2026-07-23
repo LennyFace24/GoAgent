@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { X } from 'lucide-vue-next'
 import type { Conversation } from '../types'
 
 defineProps<{
@@ -16,11 +17,7 @@ const emit = defineEmits<{
   <div :class="['conv-item', { active }]" @click="emit('select')">
     <span class="conv-title">{{ conversation.title || '新对话' }}</span>
     <button class="conv-del" @click.stop="emit('delete')" title="删除">
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-        stroke-linecap="round" stroke-linejoin="round">
-        <line x1="18" y1="6" x2="6" y2="18" />
-        <line x1="6" y1="6" x2="18" y2="18" />
-      </svg>
+      <X :size="12" :stroke-width="2.4" />
     </button>
   </div>
 </template>
@@ -30,24 +27,27 @@ const emit = defineEmits<{
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 10px 8px 12px;
-  border-radius: 6px;
+  padding: 9px 12px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-size: 0.8rem;
   color: var(--text-secondary);
-  transition: all var(--transition-fast);
-  margin-bottom: 1px;
+  transition: all var(--transition-spring);
+  margin-bottom: 2px;
   border-left: 2px solid transparent;
+  position: relative;
 }
 
 .conv-item:hover {
   background: var(--bg-hover);
+  color: var(--text-primary);
+  transform: translateX(2px);
 }
 
 .conv-item.active {
-  background: var(--bg-active);
-  color: var(--text-primary);
-  border-left-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent-bright);
+  border-left-color: var(--accent-bright);
 }
 
 .conv-title {
@@ -55,28 +55,32 @@ const emit = defineEmits<{
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  letter-spacing: -0.005em;
 }
 
 .conv-del {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  padding: 2px;
-  line-height: 1;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-xs);
   opacity: 0;
-  border-radius: 4px;
-  transition: opacity var(--transition-fast), color var(--transition-fast);
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  transform: scale(0.8);
+  transition: all var(--transition-spring);
 }
 
 .conv-item:hover .conv-del {
   opacity: 1;
+  transform: scale(1);
 }
 
 .conv-del:hover {
   color: var(--text-error);
+  background: rgba(255, 90, 110, 0.1);
 }
 </style>

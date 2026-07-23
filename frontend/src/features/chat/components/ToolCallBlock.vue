@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { Terminal } from 'lucide-vue-next'
+
 defineProps<{
   name: string
   args?: string
@@ -21,7 +23,7 @@ function summarizeArgs(args?: string): string {
 
 <template>
   <div class="tool-call">
-    <span class="tool-icon">&gt;_</span>
+    <span class="tool-icon"><Terminal :size="12" :stroke-width="2.2" /></span>
     <span class="tool-name">{{ name }}</span>
     <span class="tool-args">{{ summarizeArgs(args) }}</span>
   </div>
@@ -29,22 +31,45 @@ function summarizeArgs(args?: string): string {
 
 <style scoped>
 .tool-call {
-  display: flex; align-items: center; gap: 8px;
-  padding: 6px 12px; border-radius: 8px;
-  background: var(--bg-hover); font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 7px 12px;
+  border-radius: var(--radius-pill);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-glass);
+  font-size: 0.76rem;
   color: var(--text-secondary);
+  width: fit-content;
+  max-width: 100%;
+  backdrop-filter: var(--glass-blur-lite);
+  -webkit-backdrop-filter: var(--glass-blur-lite);
 }
+
 .tool-icon {
-  font-family: 'SF Mono', 'Consolas', monospace;
-  font-size: 0.75rem; color: var(--accent); opacity: 0.7;
+  display: flex;
+  color: var(--accent-bright);
+  flex-shrink: 0;
 }
+
 .tool-name {
-  font-weight: 500; color: var(--text-primary);
-  font-family: 'SF Mono', 'Consolas', monospace; font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  letter-spacing: -0.01em;
 }
+
 .tool-args {
-  color: var(--text-muted); font-size: 0.75rem;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  flex: 1; min-width: 0;
+  color: var(--text-muted);
+  font-size: 0.72rem;
+  font-family: var(--font-mono);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+  border-left: 1px solid var(--border-hairline);
+  padding-left: 9px;
 }
 </style>

@@ -76,7 +76,9 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 	var fullReply strings.Builder
 	var toolMsgs []*schema.Message
 
+	toolDone := make(chan struct{})
 	go func() {
+		defer close(toolDone)
 		for ev := range toolEvents {
 			log.Printf("[SSE] tool event: type=%s name=%s requestID=%s", ev.Type, ev.Name, ev.RequestID)
 			switch ev.Type {
@@ -112,6 +114,26 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 		}
 	}()
 
+	// persist 落库已收集的对话；terminated=true 时在末尾追加终止标记。
+	// 用 context.Background() 是因为 ctx.Done 分支下原 ctx 已取消，落库不应被取消。
+	persist := func(terminated bool) {
+		<-toolDone // 等待 toolEvents goroutine 结束，确保 toolMsgs 完整
+		if fullReply.Len() == 0 && len(toolMsgs) == 0 {
+			return
+		}
+		reply := fullReply.String()
+		if terminated && reply != "" {
+			reply += "\n\n该回答此处被用户终止"
+		}
+		var convMessages []*schema.Message
+		convMessages = append(convMessages, schema.UserMessage(req.Message))
+		convMessages = append(convMessages, toolMsgs...)
+		if reply != "" {
+			convMessages = append(convMessages, schema.AssistantMessage(reply, nil))
+		}
+		h.service.SaveReply(context.Background(), sessionID, conversationID, convMessages)
+	}
+
 	defer func() {
 		writeSSE("done", `"done"`)
 	}()
@@ -120,6 +142,7 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 		select {
 		case <-ctx.Done():
 			log.Printf("AgentStream(mode=%s): 客户端断开或超时", mode)
+			persist(true)
 			return
 		default:
 		}
@@ -131,6 +154,7 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 
 		if event.Err != nil {
 			writeSSE("error", fmt.Sprintf(`{"error":%q}`, event.Err.Error()))
+			persist(false)
 			return
 		}
 
@@ -160,12 +184,8 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 
 
 
-	// 持久化对话
-	var convMessages []*schema.Message
-	convMessages = append(convMessages, schema.UserMessage(req.Message))
-	convMessages = append(convMessages, toolMsgs...)
-	convMessages = append(convMessages, schema.AssistantMessage(fullReply.String(), nil))
-	h.service.SaveReply(ctx, sessionID, conversationID, convMessages)
+	// 正常结束：持久化完整对话
+	persist(false)
 }
 
 // PermissionResponse 处理前端的权限确认响应
