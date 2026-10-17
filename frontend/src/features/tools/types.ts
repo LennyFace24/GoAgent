@@ -1,9 +1,3 @@
-export interface SearchResult {
-  content?: string
-  text?: string
-  [key: string]: unknown
-}
-
 export interface TargetState {
   job: string
   instance: string

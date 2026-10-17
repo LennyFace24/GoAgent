@@ -20,7 +20,8 @@ type ToolHandler struct {
 	CompactTrigger *contexttool.CompactTrigger
 }
 
-func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Collector, getModel func() modelmgr.Model) (*ToolHandler, error) {
+func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Collector, getModel func() modelmgr.Model, mcpTools ...tool.BaseTool) (*ToolHandler, error) {
+
 	cfg := config.GetConfig()
 	workspaceRoot := ""
 	if cfg != nil {
@@ -101,25 +102,28 @@ func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Colle
 		return nil, fmt.Errorf("创建 read_todo 工具失败: %w", err)
 	}
 
+	registeredTools := []tool.BaseTool{
+		bashTool,
+		readFileTool,
+		writeFileTool,
+		editFileTool,
+		healthCheckTool,
+		knowledgeTool,
+		subProxyTool,
+		compactTool,
+		contextStatusTool,
+		taskCreateTool,
+		taskUpdateStatusTool,
+		taskGetTool,
+		taskListTool,
+		sandBoxTool,
+		todoWriter,
+		todoReader,
+	}
+	registeredTools = append(registeredTools, mcpTools...)
+
 	return &ToolHandler{
-		tools: []tool.BaseTool{
-			bashTool,
-			readFileTool,
-			writeFileTool,
-			editFileTool,
-			healthCheckTool,
-			knowledgeTool,
-			subProxyTool,
-			compactTool,
-			contextStatusTool,
-			taskCreateTool,
-			taskUpdateStatusTool,
-			taskGetTool,
-			taskListTool,
-			sandBoxTool,
-			todoWriter,
-			todoReader,
-		},
+		tools:          registeredTools,
 		CompactTrigger: compactTrigger,
 	}, nil
 }

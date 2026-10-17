@@ -8,6 +8,7 @@ require (
 	github.com/cloudwego/eino-ext/components/document/transformer/splitter/markdown v0.0.0-20260427010451-749e3706378b
 	github.com/cloudwego/eino-ext/components/embedding/openai v0.0.0-20260427010451-749e3706378b
 	github.com/cloudwego/eino-ext/components/model/openai v0.1.13
+	github.com/eino-contrib/jsonschema v1.0.3
 	github.com/gin-contrib/sessions v1.1.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
@@ -29,7 +30,6 @@ require (
 	github.com/dlclark/regexp2 v1.10.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/ebitengine/purego v0.10.0 // indirect
-	github.com/eino-contrib/jsonschema v1.0.3 // indirect
 	github.com/evanphx/json-patch v0.5.2 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.12 // indirect
 	github.com/gin-contrib/sse v1.1.0 // indirect

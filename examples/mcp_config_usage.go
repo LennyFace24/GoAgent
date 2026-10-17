@@ -15,6 +15,7 @@ func main() {
 	if err := manager.Init(); err != nil {
 		log.Fatalf("初始化失败: %v", err)
 	}
+	defer manager.Close()
 
 	// 2. 显示状态
 	manager.PrintStatus()
@@ -31,7 +32,7 @@ func main() {
 
 	// 5. 列出工具（如果有连接的服务器）
 	sessions := manager.GetAllSessions()
-	for name, session := range sessions {
+	for name := range sessions {
 		fmt.Printf("\n服务器 %s 的工具:\n", name)
 		tools, err := manager.ListTools(ctx, name)
 		if err != nil {
@@ -41,11 +42,10 @@ func main() {
 		for _, t := range tools {
 			fmt.Printf("  - %s: %s\n", t.Name, t.Description)
 		}
-		_ = session
 	}
 
 	// 6. 显示配置文件位置
 	configPath, _ := mcp.GetMCPConfigPath()
 	fmt.Printf("\n配置文件位置: %s\n", configPath)
-	fmt.Println("\n提示: 编辑配置文件后，调用 manager.Reload() 重新加载配置")
+	fmt.Println("\n提示: 配置变更后重启服务；Reload 仅重读配置，不刷新 Agent 的工具快照。")
 }

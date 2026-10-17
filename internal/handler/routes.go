@@ -1,7 +1,12 @@
 package handler
 
 import (
+	"context"
+	"errors"
+	"fmt"
+
 	"github.com/LennyFace24/MiniAgent/internal/commands"
+	"github.com/LennyFace24/MiniAgent/internal/mcp"
 	"github.com/LennyFace24/MiniAgent/internal/metrics"
 	"github.com/LennyFace24/MiniAgent/internal/modelmgr"
 	"github.com/LennyFace24/MiniAgent/internal/service"
@@ -32,33 +37,49 @@ func NewHandlers(convStore *store.ConversationStore, agentService *service.Agent
 }
 
 var (
-	handlers *Handlers
+	handlers  *Handlers
 	convStore *store.ConversationStore
 )
 
 // SetupHandler 生产装配：初始化真实依赖（registry 由 main 从 model.json 加载）
-func SetupHandler(r *gin.Engine, registry *modelmgr.Registry) {
-	var err error
+func SetupHandler(ctx context.Context, registry *modelmgr.Registry) (_ *mcp.MCPManager, err error) {
 	convStore, err = store.NewConversationStore("data/conversations")
 	if err != nil {
-		panic("初始化对话存储失败: " + err.Error())
+		return nil, fmt.Errorf("初始化对话存储失败: %w", err)
 	}
 
 	fileService := service.NewFileService()
 	collector := metrics.NewCollector()
 
-	// getModel 闭包：延迟读取 registry 默认模型（ModelSet 在 AgentService 中创建）
 	getModel := func() modelmgr.Model {
 		return registry.Default()
 	}
 
-	toolsHandler, err := tools.NewToolHandler(fileService, collector, getModel)
+	mcpManager := mcp.NewMCPManager()
+	defer func() {
+		if err != nil {
+			err = errors.Join(err, mcpManager.Close())
+		}
+	}()
+	if err := mcpManager.Init(); err != nil {
+		return nil, fmt.Errorf("初始化 MCP 管理器失败: %w", err)
+	}
+	if err := mcpManager.ConnectAll(ctx); err != nil {
+		return nil, err
+	}
+	mcpTools, err := mcpManager.Tools(ctx)
 	if err != nil {
-		panic("初始化工具处理器失败: " + err.Error())
+		return nil, fmt.Errorf("加载 MCP 工具失败: %w", err)
+	}
+
+	toolsHandler, err := tools.NewToolHandler(fileService, collector, getModel, mcpTools...)
+	if err != nil {
+		return nil, fmt.Errorf("初始化工具处理器失败: %w", err)
 	}
 
 	agentService := service.NewAgentService(toolsHandler, convStore, registry)
 	handlers = NewHandlers(convStore, agentService, fileService, collector)
+	return mcpManager, nil
 }
 
 // SetupRoutes 注册全部路由（依赖 SetupHandler 构建的 handlers）
@@ -117,7 +138,6 @@ func getCommands(c *gin.Context) {
 	cmds := registry.List()
 	c.JSON(200, gin.H{"commands": cmds})
 }
-
 
 // SwitchModel 切换当前模型
 func (hs *Handlers) SwitchModel(c *gin.Context) {

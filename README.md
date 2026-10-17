@@ -252,17 +252,49 @@ curl -X POST http://localhost:8080/api/search \
 
 ## 当前状态与已知限制
 
-当前已实现的主要能力包括流式 Agent 对话、AIOps 入口、工具注册、文件知识库、会话管理、权限响应和上下文监控。
+当前已实现的主要能力包括流式 Agent 对话、AIOps 入口、工具注册、文件知识库、会话管理、权限响应、上下文监控，以及 MCP Server 工具接入。
+
+MCP 接入支持：
+
+- 从 `GOAGENT_CONFIG` 指定目录或用户配置目录加载 `mcp_servers.json`。
+- 通过 stdio、SSE、Streamable HTTP 连接已启用的 MCP Server。
+- 在启动时发现远程工具，将其 JSON Schema 转换为 Eino 工具定义，并在 Agent Loop 中转发调用。
+- 工具名使用 `mcp__<server>__<tool>`；超长、特殊字符及歧义名称附加稳定哈希，保证模型允许的字符集与 64 字符长度限制。
+- MCP 调用复用现有 `allow / ask / deny` 权限链路；未匹配规则时询问用户，批准后才发送 `tools/call`。
+- 启动发现失败会清理已连接会话；正常退出信号会停止 HTTP 服务并关闭 MCP 子进程。
 
 以下能力仍在完善中：
 
 - 任务依赖调度系统目前仍是骨架，尚未形成完整的任务编排能力。
 - 多 Agent 团队协作尚未实现完整的 Planner/Executor 协同流程。
-- `todo_tool` 等部分工具可能已存在代码实现，但还未完全接入默认工具注册流程。
-- 长期记忆、MCP Server 自由导入等规划能力尚未完成。
+- WebSocket MCP 传输暂未由当前 Go MCP SDK 支持。
+- 长期记忆、MCP Server 配置管理 API 以及运行时无损热替换尚未完成。
+- 当前 SDK 会将 `structuredContent` 中的 JSON 数字解码为 `float64`；超过安全整数范围的标识符应由 MCP Server 返回字符串。工具调用入参使用 `json.Number` 保留精度。
 - API 请求和响应模型、鉴权策略以及生产环境部署文档仍需要进一步完善。
 
+### MCP 配置
+
+设置 `GOAGENT_CONFIG` 为配置目录，并在其中放置 `mcp_servers.json`，例如：
+
+```json
+{
+  "version": "1.0",
+  "servers": {
+    "remote": {
+      "enabled": true,
+      "transport": "streamable-http",
+      "url": "http://127.0.0.1:9000/mcp"
+    }
+  }
+}
+```
+
+将 URL 替换为实际 MCP Server 地址，重启 GoAgent 后生效。配置详细说明见 [`docs/mcp-configuration.md`](docs/mcp-configuration.md)。
+
+
 ## 开发与构建
+
+当前前端入口为 `frontend/src/main.ts` → `App.vue`，消息与历史由 `useChat.ts` 管理。旧消息组合函数、未挂载的工具面板、Vue emit 教学示例和独立 Markdown/LaTeX 诊断脚本已清理；自动测试保留在 `*.test.ts` 与 Go `*_test.go` 中。Skill 从目录中的 `SKILL.md` 发现，不再维护静态路由索引。
 
 格式化代码：
 

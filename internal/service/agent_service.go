@@ -309,6 +309,7 @@ func (s *AgentService) runLoop(
 
 			case "ask":
 				reqID := uuid.New().String()
+				decisionCh := permission.WaitForDecision(reqID, sessionID, conversationID, tc.Function.Name)
 				toolEvents <- ToolEvent{
 					Type:      "permission_request",
 					Name:      tc.Function.Name,
@@ -319,9 +320,13 @@ func (s *AgentService) runLoop(
 				}
 
 				select {
-				case approved := <-permission.WaitForDecision(reqID, sessionID, conversationID, tc.Function.Name):
+				case approved := <-decisionCh:
 					if approved {
-						result, _ = s.executeTool(ctx, tc)
+						var toolErr error
+						result, toolErr = s.executeTool(ctx, tc)
+						if toolErr != nil {
+							result = fmt.Sprintf("工具执行失败: %v", toolErr)
+						}
 						s.perms.ResetDenials()
 					} else {
 						result = "Permission denied by user"
@@ -331,6 +336,7 @@ func (s *AgentService) runLoop(
 					result = "Permission request timed out"
 					permission.CancelDecision(reqID)
 				case <-ctx.Done():
+					permission.CancelDecision(reqID)
 					return
 				}
 

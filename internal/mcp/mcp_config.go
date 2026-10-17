@@ -13,21 +13,22 @@ import (
 type MCPTransport string
 
 const (
-	TransportStdio     MCPTransport = "stdio"
-	TransportSSE       MCPTransport = "sse"
-	TransportWebSocket MCPTransport = "websocket"
+	TransportStdio          MCPTransport = "stdio"
+	TransportSSE            MCPTransport = "sse"
+	TransportStreamableHTTP MCPTransport = "streamable-http"
+	TransportWebSocket      MCPTransport = "websocket"
 )
 
 // MCPServerConfig 单个 MCP Server 配置
 type MCPServerConfig struct {
-	Enabled     bool            `json:"enabled"`
-	Transport   MCPTransport    `json:"transport"`
-	Command     string          `json:"command,omitempty"`     // stdio: 可执行命令
-	Args        []string        `json:"args,omitempty"`        // stdio: 命令参数
-	Env         map[string]string `json:"env,omitempty"`       // stdio: 环境变量
-	URL         string          `json:"url,omitempty"`         // sse/websocket: 服务地址
-	Headers     map[string]string `json:"headers,omitempty"`   // sse/websocket: 请求头
-	Description string          `json:"description,omitempty"` // 描述信息
+	Enabled     bool              `json:"enabled"`
+	Transport   MCPTransport      `json:"transport"`
+	Command     string            `json:"command,omitempty"`     // stdio: 可执行命令
+	Args        []string          `json:"args,omitempty"`        // stdio: 命令参数
+	Env         map[string]string `json:"env,omitempty"`         // stdio: 环境变量
+	URL         string            `json:"url,omitempty"`         // sse/websocket: 服务地址
+	Headers     map[string]string `json:"headers,omitempty"`     // sse/websocket: 请求头
+	Description string            `json:"description,omitempty"` // 描述信息
 }
 
 // MCPConfig MCP 配置文件结构
@@ -37,8 +38,8 @@ type MCPConfig struct {
 }
 
 var (
-	mcpConfig *MCPConfig
-	mcpOnce   sync.Once
+	mcpConfigMu sync.RWMutex
+	mcpConfig   *MCPConfig
 )
 
 // GetConfigDir 获取用户配置目录
@@ -131,47 +132,72 @@ func createDefaultMCPConfig(path string) error {
 	return os.WriteFile(path, data, 0644)
 }
 
-// LoadMCPConfig 加载 MCP 配置
-// 搜索顺序：用户目录 → 程序目录 → 默认配置
+// LoadMCPConfig 从磁盘加载 MCP 配置，并把它记为进程当前配置。
+// 读取失败与解析失败都会返回错误：坏的配置需要被修好，而不是被悄悄忽略。
 func LoadMCPConfig() (*MCPConfig, error) {
-	var loadErr error
+	config, err := loadMCPConfig()
+	if err != nil {
+		return nil, err
+	}
+	setMCPConfig(config)
+	return config, nil
+}
 
-	mcpOnce.Do(func() {
-		// 1. 尝试用户配置目录
-		configPath, err := GetMCPConfigPath()
-		if err == nil {
-			if data, err := os.ReadFile(configPath); err == nil {
-				mcpConfig = &MCPConfig{}
-				if err := json.Unmarshal(data, mcpConfig); err == nil {
-					fmt.Printf("已加载 MCP 配置: %s\n", configPath)
-					return
-				}
-			}
+// loadMCPConfig 按顺序读取第一个存在的配置文件：用户配置目录（可用
+// GOAGENT_CONFIG 覆盖），然后是可执行文件旁的便携目录。只有“文件不存在”
+// 才会继续找下一个位置；读不到或解析不了都是错误。所有位置都没有文件时
+// 返回空的默认配置。
+func loadMCPConfig() (*MCPConfig, error) {
+	for _, path := range mcpConfigCandidates() {
+		data, err := os.ReadFile(path)
+		if os.IsNotExist(err) {
+			continue
 		}
-
-		// 2. 尝试程序所在目录（便携模式）
-		exePath, err := os.Executable()
-		if err == nil {
-			portablePath := filepath.Join(filepath.Dir(exePath), "config", "mcp_servers.json")
-			if data, err := os.ReadFile(portablePath); err == nil {
-				mcpConfig = &MCPConfig{}
-				if err := json.Unmarshal(data, mcpConfig); err == nil {
-					fmt.Printf("已加载便携配置: %s\n", portablePath)
-					return
-				}
-			}
+		if err != nil {
+			return nil, fmt.Errorf("读取 MCP 配置失败 %s: %w", path, err)
 		}
-
-		// 3. 使用默认配置
-		mcpConfig = getDefaultMCPConfig()
-		fmt.Println("使用默认 MCP 配置")
-	})
-
-	if mcpConfig == nil {
-		return nil, fmt.Errorf("加载 MCP 配置失败: %v", loadErr)
+		config := &MCPConfig{}
+		if err := json.Unmarshal(data, config); err != nil {
+			return nil, fmt.Errorf("解析 MCP 配置失败 %s: %w", path, err)
+		}
+		config.dropNilServers()
+		fmt.Printf("已加载 MCP 配置: %s\n", path)
+		return config, nil
 	}
 
-	return mcpConfig, nil
+	fmt.Println("使用默认 MCP 配置")
+	return getDefaultMCPConfig(), nil
+}
+
+// mcpConfigCandidates 按解析顺序列出候选配置文件路径。
+func mcpConfigCandidates() []string {
+	var paths []string
+	if path, err := GetMCPConfigPath(); err == nil {
+		paths = append(paths, path)
+	}
+	if exePath, err := os.Executable(); err == nil {
+		paths = append(paths, filepath.Join(filepath.Dir(exePath), "config", "mcp_servers.json"))
+	}
+	return paths
+}
+
+func setMCPConfig(config *MCPConfig) {
+	mcpConfigMu.Lock()
+	mcpConfig = config
+	mcpConfigMu.Unlock()
+}
+
+// dropNilServers 删除 `"name": null` 这类没有配置内容的条目，避免调用方
+// 读字段时 panic。
+func (c *MCPConfig) dropNilServers() {
+	if c == nil {
+		return
+	}
+	for name, server := range c.Servers {
+		if server == nil {
+			delete(c.Servers, name)
+		}
+	}
 }
 
 // getDefaultMCPConfig 获取默认配置
@@ -182,19 +208,25 @@ func getDefaultMCPConfig() *MCPConfig {
 	}
 }
 
-// GetMCPConfig 获取已加载的 MCP 配置
+// GetMCPConfig 返回最近一次加载成功的配置；还没加载过就返回空的默认配置。
+// 它不读磁盘，因此不会隐藏加载错误——需要感知错误请用 LoadMCPConfig。
 func GetMCPConfig() *MCPConfig {
-	if mcpConfig == nil {
-		config, _ := LoadMCPConfig()
-		return config
+	mcpConfigMu.RLock()
+	config := mcpConfig
+	mcpConfigMu.RUnlock()
+	if config == nil {
+		return getDefaultMCPConfig()
 	}
-	return mcpConfig
+	return config
 }
 
 // GetEnabledServers 获取所有启用的 Server
 func (c *MCPConfig) GetEnabledServers() map[string]*MCPServerConfig {
 	enabled := make(map[string]*MCPServerConfig)
 	for name, server := range c.Servers {
+		if server == nil {
+			continue
+		}
 		if server.Enabled {
 			enabled[name] = server
 		}
@@ -219,6 +251,6 @@ func SaveMCPConfig(config *MCPConfig) error {
 	}
 
 	// 更新内存中的配置
-	mcpConfig = config
+	setMCPConfig(config)
 	return nil
 }
