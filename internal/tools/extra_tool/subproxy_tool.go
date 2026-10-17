@@ -4,11 +4,11 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/LennyFace24/MiniAgent/internal/config"
+	cfg "github.com/LennyFace24/MiniAgent/internal/config"
+	"github.com/LennyFace24/MiniAgent/internal/modelmgr"
 	"github.com/LennyFace24/MiniAgent/internal/tools/basic_tool"
 	"github.com/LennyFace24/MiniAgent/internal/util"
 
-	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 	"github.com/cloudwego/eino/schema"
@@ -21,21 +21,16 @@ type SubProxyInput struct {
 	Content           string `json:"content" description:"The content of the task to be executed." required:"true"`
 }
 
-func runSubAggent(ctx context.Context, content SubProxyInput) string {
-	cfg := config.GetConfig()
-	chatmodel, err := openai.NewChatModel(ctx, &openai.ChatModelConfig{
-		Model:     cfg.Llm.Model,
-		APIKey:    cfg.Llm.ApiKey,
-		BaseURL:   cfg.Llm.BaseUrl,
-		MaxTokens: &cfg.Llm.MaxTokens,
-	})
+// runSubAggent 使用当前激活模型运行子代理（跟随主模型切换）
+func runSubAggent(ctx context.Context, content SubProxyInput, model modelmgr.Model) string {
+	chatmodel, err := model.BuildChatModel(ctx)
 	if err != nil {
 		return fmt.Sprintf("Error creating subagent: %v", err)
 	}
 
 	workspaceRoot := ""
-	if cfg != nil {
-		workspaceRoot = cfg.Workspace.Root
+	if c := cfg.GetConfig(); c != nil {
+		workspaceRoot = c.Workspace.Root
 	}
 
 	tools_ := []tool.BaseTool{
@@ -109,12 +104,18 @@ func executeTool(ctx context.Context, tc schema.ToolCall, toolMap map[string]too
 	return t.InvokableRun(ctx, tc.Function.Arguments)
 }
 
-func NewSubProxyTool() (tool.InvokableTool, error) {
+// NewSubProxyTool 创建 subproxy 工具。
+// getModel 由调用方注入：返回当前激活模型，切换主模型后子代理自动跟随。
+func NewSubProxyTool(getModel func() modelmgr.Model) (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"subproxy",
 		"Run a subtask in a clean context and return a summary.",
 		func(ctx context.Context, input SubProxyInput) (string, error) {
-			return runSubAggent(ctx, input), nil
+			m := modelmgr.Model{}
+			if getModel != nil {
+				m = getModel()
+			}
+			return runSubAggent(ctx, input, m), nil
 		},
 	)
 }

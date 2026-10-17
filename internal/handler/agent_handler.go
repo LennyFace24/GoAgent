@@ -217,13 +217,20 @@ func (h *AgentHandler) PermissionResponse(c *gin.Context) {
 		conversationID = "default"
 	}
 
-	if !permission.HandleResponse(req.ID, sessionID, conversationID, req.Approved) {
+	handled, toolName := permission.HandleResponse(req.ID, sessionID, conversationID, req.Approved)
+	if !handled {
 		c.JSON(404, gin.H{"error": "permission request not found"})
 		return
 	}
 
-	if req.Always && req.Approved {
-		log.Printf("PermissionResponse: 鐢ㄦ埛閫夋嫨濮嬬粓鍏佽 request=%s", req.ID)
+	if req.Always && req.Approved && toolName != "" {
+		// "始终允许"：写入内存规则 + 持久化到 permission.json
+		h.service.PermissionManager().AddRule(permission.Rule{Tool: toolName, Behavior: permission.BehaviorAllow})
+		if err := permission.PersistAlwaysAllow("permission.json", toolName); err != nil {
+			log.Printf("PermissionResponse: 持久化 always 规则失败 %v", err)
+		} else {
+			log.Printf("PermissionResponse: 用户选择始终允许 tool=%s", toolName)
+		}
 	}
 
 	c.JSON(200, gin.H{"ok": true})

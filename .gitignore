@@ -15,6 +15,7 @@ go.work
 
 # Secrets & config (contains API keys)
 config.yaml
+model.json
 
 # Data
 data/

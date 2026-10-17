@@ -32,181 +32,206 @@ const isUploading = ref(false)
 const uploadProgress = ref(0)
 const docsList = ref<string[]>([])
 
-async function handleCreate() {
-  const id = await create()
-  if (id) emit('created', id)
+// ---------- 宽度可调 + 收起/展开 ----------
+const MIN_WIDTH = 160
+const MAX_WIDTH = 420
+const COLLAPSE_THRESHOLD = 96 // 拖到低于该宽度时瞬间收起
+const sidebarWidth = ref(280) // 当前宽度（初始与 CSS 变量一致）
+const collapsed = ref(false)
+
+// 拖拽调整宽度
+let dragStartX = 0
+let dragStartWidth = 0
+let dragging = false
+
+function onResizeStart(e: PointerEvent) {
+  dragging = true
+  dragStartX = e.clientX
+  dragStartWidth = sidebarWidth.value
+  // 拖拽期间禁用文本选择，避免选中内容干扰
+  document.body.style.userSelect = 'none'
+  window.addEventListener('pointermove', onResizeMove)
+  window.addEventListener('pointerup', onResizeEnd)
 }
 
-async function handleDelete(id: string, event: Event) {
-  event.stopPropagation()
-  await remove(id)
-  if (props.activeId === id) {
-    if (conversations.value.length > 0) {
-      emit('select', conversations.value[0].id)
-    } else {
-      emit('select', '')
-    }
+function onResizeMove(e: PointerEvent) {
+  if (!dragging) return
+  const delta = e.clientX - dragStartX
+  const next = dragStartWidth + delta
+  if (next <= COLLAPSE_THRESHOLD) {
+    // 拖到过窄 → 瞬间收起
+    collapsed.value = true
+    sidebarWidth.value = 0
+    return
+  }
+  // 从收起状态拖出则先恢复
+  if (collapsed.value && next > COLLAPSE_THRESHOLD) {
+    collapsed.value = false
+  }
+  sidebarWidth.value = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, next))
+}
+
+function onResizeEnd() {
+  dragging = false
+  document.body.style.userSelect = ''
+  window.removeEventListener('pointermove', onResizeMove)
+  window.removeEventListener('pointerup', onResizeEnd)
+}
+
+// 收起/展开切换
+function toggleCollapse() {
+  collapsed.value = !collapsed.value
+  sidebarWidth.value = collapsed.value ? 0 : 280
+}
+
+// 展开（拖拽手柄点击恢复）
+function expand() {
+  if (collapsed.value) {
+    collapsed.value = false
+    sidebarWidth.value = 280
   }
 }
-
-// 拖拽上传 RAG 文件
-function handleDrop(e: DragEvent) {
-  e.preventDefault()
-  const files = e.dataTransfer?.files
-  if (files && files.length > 0) {
-    uploadFile(files[0])
-  }
-}
-
-function handleFileSelect(e: Event) {
-  const target = e.target as HTMLInputElement
-  if (target.files && target.files.length > 0) {
-    uploadFile(target.files[0])
-  }
-}
-
-function uploadFile(file: File) {
-  isUploading.value = true
-  uploadProgress.value = 10
-
-  const interval = setInterval(() => {
-    uploadProgress.value += 15
-    if (uploadProgress.value >= 100) {
-      clearInterval(interval)
-      isUploading.value = false
-      docsList.value.unshift(file.name)
-    }
-  }, 300)
-}
-
-onMounted(() => {
-  load()
-})
-
-watch(() => props.activeNav, () => {
-  load()
-})
 </script>
 
 <template>
-  <aside class="sub-sidebar">
-    <!-- 头部搜索与操作 -->
-    <div class="header-search" v-if="activeNav !== 'dashboard'">
-      <Search class="search-glyph" :size="14" :stroke-width="2" />
-      <input
-        v-model="searchQuery"
-        type="text"
-        :placeholder="activeNav === 'rag' ? '搜索本地文档...' : '搜索对话历史...'"
-        class="search-input"
-      />
+
+  <aside class="sub-sidebar" :class="{ collapsed, dragging }" :style="{ width: sidebarWidth + 'px' }">
+    <!-- 收起状态：窄条显示展开按钮 -->
+    <div v-if="collapsed" class="sub-sidebar-collapsed-bar">
+      <button class="expand-btn" @click="expand" title="展开会话列表">
+        <MessageSquare :size="16" :stroke-width="1.8" />
+      </button>
     </div>
 
-    <!-- 对话列表 -->
-    <div v-if="activeNav === 'chat' || activeNav === 'aiops'" class="sidebar-list">
-      <div class="list-title">
-        <span class="title-label">会话</span>
-        <span class="title-count">{{ conversations.length }}</span>
-        <button class="new-btn" @click="handleCreate" title="新建会话">
-          <Plus :size="16" :stroke-width="2.2" />
+    <template v-else>
+      <!-- 头部搜索与操作 -->
+      <div class="header-search" v-if="activeNav !== 'dashboard'">
+        <Search class="search-glyph" :size="14" :stroke-width="2" />
+        <input
+          v-model="searchQuery"
+          type="text"
+          :placeholder="activeNav === 'rag' ? '搜索本地文档...' : '搜索对话历史...'"
+          class="search-input"
+        />
+        <button class="collapse-btn" @click="toggleCollapse" title="收起侧栏">
+          <X :size="14" :stroke-width="2.2" />
         </button>
       </div>
 
-      <div class="items-container">
-        <div
-          v-for="conv in conversations"
-          :key="conv.id"
-          class="conv-item"
-          :class="{ active: activeId === conv.id }"
-          @click="emit('select', conv.id)"
-        >
-          <span class="item-glyph"><MessageSquare :size="14" :stroke-width="1.8" /></span>
-          <span class="item-title">{{ conv.title }}</span>
-          <button class="delete-item-btn" @click="handleDelete(conv.id, $event)" title="删除">
-            <X :size="13" :stroke-width="2.2" />
+      <!-- 对话列表 -->
+      <div v-if="activeNav === 'chat' || activeNav === 'aiops'" class="sidebar-list">
+        <div class="list-title">
+          <span class="title-label">会话</span>
+          <span class="title-count">{{ conversations.length }}</span>
+          <button class="new-btn" @click="handleCreate" title="新建会话">
+            <Plus :size="16" :stroke-width="2.2" />
           </button>
         </div>
-      </div>
-    </div>
 
-    <!-- 指标仪表盘模式 (Dashboard) -->
-    <div v-else-if="activeNav === 'dashboard'" class="sidebar-list">
-      <div class="list-title">
-        <span class="title-label">监控</span>
-      </div>
-      <div class="items-container">
-        <div
-          class="conv-item"
-          :class="{ active: (dashboardView ?? 'overview') === 'overview' }"
-          @click="emit('dashboard-view', 'overview')"
-        >
-          <span class="item-glyph"><BarChart3 :size="14" :stroke-width="1.8" /></span>
-          <span class="item-title">核心指标监控</span>
-        </div>
-        <div
-          class="conv-item"
-          :class="{ active: dashboardView === 'line' }"
-          @click="emit('dashboard-view', 'line')"
-        >
-          <span class="item-glyph"><TrendingUp :size="14" :stroke-width="1.8" /></span>
-          <span class="item-title">实时趋势折线</span>
-        </div>
-        <div
-          class="conv-item"
-          :class="{ active: dashboardView === 'pie' }"
-          @click="emit('dashboard-view', 'pie')"
-        >
-          <span class="item-glyph"><PieChart :size="14" :stroke-width="1.8" /></span>
-          <span class="item-title">资源配比饼图</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- 本地知识库模式 (RAG) -->
-    <div v-else-if="activeNav === 'rag'" class="sidebar-list">
-      <div class="list-title">
-        <span class="title-label">知识手册</span>
-      </div>
-
-      <!-- 拖拽上传框 -->
-      <div class="upload-box" @dragover.prevent @drop="handleDrop">
-        <div v-if="!isUploading" class="upload-inner">
-          <Upload class="upload-icon" :size="26" :stroke-width="1.6" />
-          <span class="upload-text">拖拽文件或点击上传</span>
-          <input
-            type="file"
-            class="file-input-hidden"
-            @change="handleFileSelect"
-            accept=".txt,.md,.pdf,.json"
-          />
-        </div>
-        <div v-else class="progress-container">
-          <div class="progress-bar-bg">
-            <div class="progress-bar-fill" :style="{ width: uploadProgress + '%' }"></div>
+        <div class="items-container">
+          <div
+            v-for="conv in conversations"
+            :key="conv.id"
+            class="conv-item"
+            :class="{ active: activeId === conv.id }"
+            @click="emit('select', conv.id)"
+          >
+            <span class="item-glyph"><MessageSquare :size="14" :stroke-width="1.8" /></span>
+            <span class="item-title">{{ conv.title }}</span>
+            <button class="delete-item-btn" @click="handleDelete(conv.id, $event)" title="删除">
+              <X :size="13" :stroke-width="2.2" />
+            </button>
           </div>
-          <span class="progress-text">入库向量化中 {{ uploadProgress }}%</span>
         </div>
       </div>
 
-      <!-- 已上传文档列表 -->
-      <div class="docs-list-title">
-        <Layers :size="11" :stroke-width="2" />
-        <span>已同步手册</span>
-        <span class="docs-count">{{ docsList.length }}</span>
-      </div>
-      <div class="docs-container">
-        <div v-for="doc in docsList" :key="doc" class="doc-item">
-          <FileText class="doc-icon" :size="14" :stroke-width="1.8" />
-          <span class="doc-name">{{ doc }}</span>
-          <span class="doc-badge">已向量化</span>
+      <!-- 指标仪表盘模式 (Dashboard) -->
+      <div v-else-if="activeNav === 'dashboard'" class="sidebar-list">
+        <div class="list-title">
+          <span class="title-label">监控</span>
+        </div>
+        <div class="items-container">
+          <div
+            class="conv-item"
+            :class="{ active: (dashboardView ?? 'overview') === 'overview' }"
+            @click="emit('dashboard-view', 'overview')"
+          >
+            <span class="item-glyph"><BarChart3 :size="14" :stroke-width="1.8" /></span>
+            <span class="item-title">核心指标监控</span>
+          </div>
+          <div
+            class="conv-item"
+            :class="{ active: dashboardView === 'line' }"
+            @click="emit('dashboard-view', 'line')"
+          >
+            <span class="item-glyph"><TrendingUp :size="14" :stroke-width="1.8" /></span>
+            <span class="item-title">实时趋势折线</span>
+          </div>
+          <div
+            class="conv-item"
+            :class="{ active: dashboardView === 'pie' }"
+            @click="emit('dashboard-view', 'pie')"
+          >
+            <span class="item-glyph"><PieChart :size="14" :stroke-width="1.8" /></span>
+            <span class="item-title">资源配比饼图</span>
+          </div>
         </div>
       </div>
-    </div>
+
+      <!-- 本地知识库模式 (RAG) -->
+      <div v-else-if="activeNav === 'rag'" class="sidebar-list">
+        <div class="list-title">
+          <span class="title-label">知识手册</span>
+        </div>
+
+        <!-- 拖拽上传框 -->
+        <div class="upload-box" @dragover.prevent @drop="handleDrop">
+          <div v-if="!isUploading" class="upload-inner">
+            <Upload class="upload-icon" :size="26" :stroke-width="1.6" />
+            <span class="upload-text">拖拽文件或点击上传</span>
+            <input
+              type="file"
+              class="file-input-hidden"
+              @change="handleFileSelect"
+              accept=".txt,.md,.pdf,.json"
+            />
+          </div>
+          <div v-else class="progress-container">
+            <div class="progress-bar-bg">
+              <div class="progress-bar-fill" :style="{ width: uploadProgress + '%' }"></div>
+            </div>
+            <span class="progress-text">入库向量化中 {{ uploadProgress }}%</span>
+          </div>
+        </div>
+
+        <!-- 已上传文档列表 -->
+        <div class="docs-list-title">
+          <Layers :size="11" :stroke-width="2" />
+          <span>已同步手册</span>
+          <span class="docs-count">{{ docsList.length }}</span>
+        </div>
+        <div class="docs-container">
+          <div v-for="doc in docsList" :key="doc" class="doc-item">
+            <FileText class="doc-icon" :size="14" :stroke-width="1.8" />
+            <span class="doc-name">{{ doc }}</span>
+            <span class="doc-badge">已向量化</span>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- 右侧拖拽调整宽度手柄（收起时不可见） -->
+    <div
+      v-if="!collapsed"
+      class="resize-handle"
+      @pointerdown="onResizeStart"
+      title="拖拽调整宽度"
+    ></div>
   </aside>
 </template>
 
 <style scoped>
 .sub-sidebar {
-  width: var(--sidebar-sub-w);
   background: var(--bg-sidebar-sub);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -215,9 +240,98 @@ watch(() => props.activeNav, () => {
   flex-direction: column;
   height: 100vh;
   flex-shrink: 0;
+  overflow: hidden;
+  position: relative;
+  /* 收起/展开宽度过渡 */
+  transition: width 0.3s var(--ease-out-expo);
 }
 
-/* ---------- 搜索框 ---------- */
+/* 拖拽过程中禁用过渡，保证实时跟手 */
+.sub-sidebar.dragging {
+  transition: none;
+}
+
+/* 拖拽手柄：右侧边缘细条 */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+}
+
+.resize-handle:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  right: 2px;
+  width: 2px;
+  height: 100%;
+  background: transparent;
+  transition: background 0.2s;
+}
+
+.resize-handle:hover::after {
+  background: var(--accent-bright);
+  opacity: 0.5;
+}
+
+/* 收起状态：窄条 */
+.sub-sidebar-collapsed-bar {
+  width: 100%;
+  height: 100vh;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 14px;
+}
+
+.expand-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-input);
+  border: 1px solid var(--border-glass);
+  color: var(--text-secondary);
+  width: 34px;
+  height: 34px;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: all var(--transition-spring);
+}
+
+.expand-btn:hover {
+  color: var(--accent-bright);
+  border-color: var(--border-focus);
+  transform: translateY(-1px);
+}
+
+/* 收起按钮（搜索栏右侧） */
+.collapse-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all var(--transition-fast);
+}
+
+.collapse-btn:hover {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
 .header-search {
   padding: 18px 18px 14px;
   border-bottom: 1px solid var(--border-hairline);

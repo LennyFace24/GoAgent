@@ -5,6 +5,7 @@ import (
 
 	"github.com/LennyFace24/MiniAgent/internal/config"
 	"github.com/LennyFace24/MiniAgent/internal/metrics"
+	"github.com/LennyFace24/MiniAgent/internal/modelmgr"
 	"github.com/LennyFace24/MiniAgent/internal/task"
 	basictool "github.com/LennyFace24/MiniAgent/internal/tools/basic_tool"
 	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
@@ -19,7 +20,7 @@ type ToolHandler struct {
 	CompactTrigger *contexttool.CompactTrigger
 }
 
-func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Collector) (*ToolHandler, error) {
+func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Collector, getModel func() modelmgr.Model) (*ToolHandler, error) {
 	cfg := config.GetConfig()
 	workspaceRoot := ""
 	if cfg != nil {
@@ -73,10 +74,7 @@ func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Colle
 	if err != nil {
 		return nil, fmt.Errorf("创建 edit_file 工具失败: %w", err)
 	}
-	subProxyTool, err := extratool.NewSubProxyTool()
-	if err != nil {
-		return nil, fmt.Errorf("创建 subproxy 工具失败: %w", err)
-	}
+	subProxyTool, err := extratool.NewSubProxyTool(getModel)
 
 	compactTool, compactTrigger, err := contexttool.NewCompactTool()
 	if err != nil {
@@ -91,6 +89,16 @@ func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Colle
 	sandBoxTool, err := sandboxtool.NewSandBoxTool(cfg.Sandbox.Endpoint)
 	if err != nil {
 		return nil, fmt.Errorf("创建 sandbox_tool 工具失败: %w", err)
+	}
+
+	todoWriter, err := extratool.NewTodoWriter()
+	if err != nil {
+		return nil, fmt.Errorf("创建 write_todo 工具失败: %w", err)
+	}
+
+	todoReader, err := extratool.NewTodoReader()
+	if err != nil {
+		return nil, fmt.Errorf("创建 read_todo 工具失败: %w", err)
 	}
 
 	return &ToolHandler{
@@ -109,6 +117,8 @@ func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Colle
 			taskGetTool,
 			taskListTool,
 			sandBoxTool,
+			todoWriter,
+			todoReader,
 		},
 		CompactTrigger: compactTrigger,
 	}, nil

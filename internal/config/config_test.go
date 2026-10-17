@@ -23,7 +23,7 @@ func writeTestConfig(t *testing.T, body string) string {
 	return path
 }
 
-func TestLoadConfigNormalizesLLMContextBudget(t *testing.T) {
+func TestLoadConfig(t *testing.T) {
 	resetConfigForTest()
 	t.Cleanup(resetConfigForTest)
 
@@ -31,13 +31,6 @@ func TestLoadConfigNormalizesLLMContextBudget(t *testing.T) {
 server:
     host: 127.0.0.1
     port: 8080
-llm:
-    base_url: https://example.com/v1
-    api_key: test-key
-    model: test-model
-    context_window: 200000
-    max_completion_tokens: 8192
-    safety_margin_tokens: 4096
 embedding:
     base_url: https://embedding.example.com/v1
     api_key: test-key
@@ -53,27 +46,20 @@ session:
 	if cfg == nil {
 		t.Fatal("LoadConfig returned nil")
 	}
-
-	if cfg.Llm.ContextWindow != 200000 {
-		t.Fatalf("ContextWindow = %d, want 200000", cfg.Llm.ContextWindow)
-	}
-	if cfg.Llm.SafetyMarginTokens != 4096 {
-		t.Fatalf("SafetyMarginTokens = %d, want 4096", cfg.Llm.SafetyMarginTokens)
-	}
-	if got, want := cfg.ContextBudgetTokens(), int64(187712); got != want {
-		t.Fatalf("ContextBudgetTokens() = %d, want %d", got, want)
+	if cfg.Server.Port != "8080" {
+		t.Fatalf("Server.Port = %q, want 8080", cfg.Server.Port)
 	}
 }
 
-func TestConfigDefaultsContextWindowWhenMissing(t *testing.T) {
+func TestConfigDefaults(t *testing.T) {
 	cfg := &Config{}
 	cfg.ApplyDefaults()
 
-	if cfg.Llm.ContextWindow != DefaultContextWindow {
-		t.Fatalf("ContextWindow = %d, want %d", cfg.Llm.ContextWindow, DefaultContextWindow)
+	if cfg.Server.Host != "127.0.0.1" {
+		t.Fatalf("Server.Host = %q, want 127.0.0.1", cfg.Server.Host)
 	}
-	if got := cfg.ContextBudgetTokens(); got != int64(DefaultContextWindow) {
-		t.Fatalf("ContextBudgetTokens() = %d, want %d", got, int64(DefaultContextWindow))
+	if cfg.Server.Port != "8080" {
+		t.Fatalf("Server.Port = %q, want 8080", cfg.Server.Port)
 	}
 	// ApplyDefaults 未配置 workspace.root 时回退到当前目录
 	if cfg.Workspace.Root != "." {
@@ -81,32 +67,13 @@ func TestConfigDefaultsContextWindowWhenMissing(t *testing.T) {
 	}
 }
 
-func TestValidateRejectsMissingRequiredFields(t *testing.T) {
-	cases := []struct {
-		name    string
-		setup   func(c *Config)
-		wantSub string
-	}{
-		{"nil", nil, "nil"},
-		{"missing api_key", func(c *Config) { c.Llm.BaseUrl = "u"; c.Llm.Model = "m" }, "api_key"},
-		{"missing base_url", func(c *Config) { c.Llm.ApiKey = "k"; c.Llm.Model = "m" }, "base_url"},
-		{"missing model", func(c *Config) { c.Llm.BaseUrl = "u"; c.Llm.ApiKey = "k" }, "model"},
+func TestValidateRejectsNilAndMissingSecretKey(t *testing.T) {
+	if err := (*Config)(nil).Validate(); err == nil || !strings.Contains(err.Error(), "nil") {
+		t.Fatalf("nil Validate err = %v, want nil error", err)
 	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			var c *Config
-			if tc.setup != nil {
-				c = &Config{}
-				tc.setup(c)
-			}
-			err := c.Validate()
-			if err == nil {
-				t.Fatalf("expected error containing %q, got nil", tc.wantSub)
-			}
-			if !strings.Contains(err.Error(), tc.wantSub) {
-				t.Fatalf("error = %q, want substring %q", err.Error(), tc.wantSub)
-			}
-		})
+	c := &Config{}
+	if err := c.Validate(); err == nil || !strings.Contains(err.Error(), "secret_key") {
+		t.Fatalf("missing secret_key err = %v, want secret_key error", err)
 	}
 }
 
@@ -116,10 +83,9 @@ func TestLoadConfigFailsOnMissingSecretKey(t *testing.T) {
 
 	// 故意省略 session.secret_key
 	path := writeTestConfig(t, `
-llm:
-    base_url: https://example.com/v1
-    api_key: test-key
-    model: test-model
+server:
+    host: 127.0.0.1
+    port: 8080
 `)
 	cfg, err := LoadConfig(path)
 	if err == nil {

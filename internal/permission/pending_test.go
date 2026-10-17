@@ -3,9 +3,9 @@ package permission
 import "testing"
 
 func TestHandleResponseRequiresMatchingSession(t *testing.T) {
-	ch := WaitForDecision("req-1", "session-a", "conversation-a")
+	ch := WaitForDecision("req-1", "session-a", "conversation-a", "bash")
 
-	if handled := HandleResponse("req-1", "session-b", "conversation-a", true); handled {
+	if handled, _ := HandleResponse("req-1", "session-b", "conversation-a", true); handled {
 		t.Fatalf("expected mismatched session to be rejected")
 	}
 
@@ -15,7 +15,7 @@ func TestHandleResponseRequiresMatchingSession(t *testing.T) {
 	default:
 	}
 
-	if handled := HandleResponse("req-1", "session-a", "conversation-a", true); !handled {
+	if handled, toolName := HandleResponse("req-1", "session-a", "conversation-a", true); !handled || toolName != "bash" {
 		t.Fatalf("expected matching response to be accepted")
 	}
 

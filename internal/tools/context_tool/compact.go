@@ -27,9 +27,21 @@ const (
 
 type CompactInput struct{}
 
-// CompactTrigger 共享触发器，service 层通过检查 Triggered 判断是否需要压缩
 type CompactTrigger struct {
 	triggered atomic.Bool
+}
+
+// 全局共享触发器：compact 工具与 /compact 命令共用同一实例
+var globalTrigger = &CompactTrigger{}
+
+// GetCompactTrigger 返回全局压缩触发器
+func GetCompactTrigger() *CompactTrigger {
+	return globalTrigger
+}
+
+// Trigger 手动触发压缩标记（/compact 命令使用）
+func (t *CompactTrigger) Trigger() {
+	t.triggered.Store(true)
 }
 
 func (t *CompactTrigger) IsTriggered() bool {
@@ -39,20 +51,18 @@ func (t *CompactTrigger) IsTriggered() bool {
 // NewCompactTool 返回工具和触发器引用
 // 工具注册到 ToolHandler，触发器传给 service 层
 func NewCompactTool() (tool.InvokableTool, *CompactTrigger, error) {
-	trigger := &CompactTrigger{}
-
 	tool, err := utils.InferTool(
 		"compact",
 		"主动触发上下文压缩。当对话过长、影响回答质量时调用。系统会保留最近的对话，将早期对话压缩为摘要。",
 		func(ctx context.Context, input CompactInput) (string, error) {
-			trigger.triggered.Store(true)
+			globalTrigger.Trigger()
 			return "上下文压缩已触发，系统将在下一轮自动压缩历史消息。", nil
 		},
 	)
 	if err != nil {
 		return nil, nil, err
 	}
-	return tool, trigger, nil
+	return tool, globalTrigger, nil
 }
 
 // ---------- 压缩核心逻辑 ----------

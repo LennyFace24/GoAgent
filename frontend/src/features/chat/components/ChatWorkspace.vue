@@ -3,7 +3,7 @@ export default { name: 'ChatWorkspace' }
 </script>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, onMounted } from 'vue'
 import { Cpu, ScrollText, HardDrive, MessageCircle, Stethoscope, MonitorPlay } from 'lucide-vue-next'
 import ContextStatus from './ContextStatus.vue'
 import InputBar from './InputBar.vue'
@@ -15,20 +15,14 @@ import MessageBubble from './MessageBubble.vue'
 import LoadingCard from './LoadingCard.vue'
 
 import { useChat } from '../composables/useChat'
+import { useModelSwitcher } from '../composables/useModelSwitcher'
+import { useCommands } from '../composables/useCommands'
 
 // ---------- Props & Emits ----------
 
 const props = defineProps<{
   conversationId: string
-  isMonitorOpen: boolean
 }>()
-
-const emit = defineEmits<{
-  'update:isMonitorOpen': [value: boolean]
-}>()
-
-// ---------- 状态 ----------
-
 const msgArea = ref<HTMLElement | null>(null)
 const chatMode = ref<'chat' | 'aiops'>('aiops')
 const conversationIdRef = ref(props.conversationId)
@@ -66,28 +60,123 @@ function triggerQuickAction(text: string) {
 }
 
 // ---------- 命令处理 ----------
+// 从 useCommands 获取命令列表（含 builtin server/file-based/skill 命令）
 
-function executeCommand(name: string): void {
-  switch (name) {
-    case 'clear':
-      messages.value = []
-      break
-    case 'compact':
-      send('/compact')
-      break
-    case 'context':
-      showContextStatus()
-      break
-    case 'help':
-      showHelp()
-      break
-    case 'model':
-      showModelInfo()
-      break
-    default:
-      // 未识别的命令交给后端处理
-      send(`/${name}`)
-      break
+const {
+  commands: allCommands,
+} = useCommands()
+
+// 解析斜杠命令文本：/name arg1 arg2 → { name, args }
+function parseCommand(text: string): { name: string; args: string[] } | null {
+  const parts = text.trim().slice(1).split(/\s+/)
+  const name = parts[0] || ''
+  if (!name) return null
+  return { name, args: parts.slice(1) }
+}
+
+// 执行 server 命令：调 /api/commands/execute，结果按类型处理
+async function executeServerCommand(name: string, args: string[], raw: string): Promise<void> {
+  // user 原文先进缓冲（与后端落库一致）
+  messages.value.push({ id: Date.now(), role: 'user', content: raw })
+  try {
+    const res = await fetch('/api/commands/execute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      credentials: 'include',
+      body: JSON.stringify({ name, args, conversation_id: conversationIdRef.value }),
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      messages.value.push({
+        id: Date.now(),
+        role: 'assistant',
+        content: `[命令错误 ${res.status}] ${err.error || '执行失败'}`,
+      })
+      return
+    }
+    const data = await res.json()
+    if (data.type === 'file') {
+      // file-based 命令：渲染文本作为普通消息发出（进管线）
+      send(data.rendered)
+    } else {
+      // builtin 命令：结果直接展示
+      messages.value.push({ id: Date.now(), role: 'assistant', content: data.result || '' })
+    }
+  } catch {
+    messages.value.push({ id: Date.now(), role: 'assistant', content: '[命令执行失败，请重试]' })
+  }
+}
+
+async function executeCommand(text: string): Promise<void> {
+  const parsed = parseCommand(text)
+  if (!parsed) return
+  const { name, args } = parsed
+
+  // 1. client 命令：本地处理
+  if (name === 'clear') {
+    messages.value = []
+    return
+  }
+  if (name === 'help') {
+    showHelp()
+    return
+  }
+  if (name === 'model') {
+    // /model → 弹出模型选择窗口
+    showModelPicker()
+    return
+  }
+
+  // 2. 已知命令（builtin server / file-based / skill）→ 后端执行
+  const known = allCommands.value.find((c) => c.name === name)
+  if (known) {
+    await executeServerCommand(name, args, text.trim())
+    return
+  }
+
+  // 3. 未知命令：原样发给后端（与 omp 一致，不拒绝）
+  send(text.trim())
+}
+
+// /model 命令：弹出模型选择窗口
+const modelPickerVisible = ref(false)
+const modelPickerBusy = ref(false)
+
+async function showModelPicker(): Promise<void> {
+  await loadModels()
+  modelPickerVisible.value = true
+}
+
+async function pickModel(id: string): Promise<void> {
+  if (modelPickerBusy.value) return
+  modelPickerBusy.value = true
+  try {
+    const ok = await switchModel(id)
+    if (ok) {
+      modelPickerVisible.value = false
+      messages.value.push({
+        id: Date.now(),
+        role: 'assistant',
+        content: `已切换到模型: \`${id}\``,
+      })
+    }
+  } finally {
+    modelPickerBusy.value = false
+  }
+}
+
+function closeModelPicker(): void {
+  modelPickerVisible.value = false
+}
+
+// handleSend：斜杠命令走 executeCommand，其余发后端
+function handleSend(text: string): void {
+  const trimmed = text.trim()
+  if (!trimmed) return
+  if (trimmed.startsWith('/')) {
+    executeCommand(trimmed)
+  } else {
+    send(trimmed)
   }
 }
 
@@ -120,14 +209,16 @@ function showHelp() {
 }
 
 async function showModelInfo() {
-  let modelName = '未知'
-  try {
-    const res = await fetch('/api/model', { credentials: 'include' })
-    if (res.ok) {
-      const data = await res.json()
-      modelName = data.model || modelName
-    }
-  } catch { /* ignore */ }
+  let modelName = currentModel.value || '未知'
+  if (!currentModel.value) {
+    try {
+      const res = await fetch('/api/model', { credentials: 'include' })
+      if (res.ok) {
+        const data = await res.json()
+        modelName = data.current || modelName
+      }
+    } catch { /* ignore */ }
+  }
   messages.value.push({
     id: Date.now(),
     role: 'assistant',
@@ -135,19 +226,20 @@ async function showModelInfo() {
   })
 }
 
-// ---------- 输入处理 ----------
+// ---------- 模型切换 ----------
 
-// InputBar 发送：斜杠命令走本地副作用，其余发给后端
-function handleSend(text: string): void {
-  const trimmed = text.trim()
-  if (!trimmed) return
-  if (trimmed.startsWith('/')) {
-    const name = trimmed.slice(1).split(/\s+/)[0]
-    executeCommand(name)
-  } else {
-    send(trimmed)
-  }
-}
+const {
+  models,
+  currentModel,
+  switchError: modelSwitchError,
+  loadModels,
+  switchModel,
+} = useModelSwitcher()
+
+onMounted(loadModels)
+
+
+
 
 // ---------- 快捷动作 & 模式 ----------
 
@@ -186,12 +278,19 @@ const modeOptions: ModeOption[] = [
         <span class="model-badge">GoAgent Copilot</span>
       </div>
       <div class="header-actions">
+        <!-- 模型选择器 -->
+        <div class="model-selector">
+          <select
+            v-model="currentModel"
+            @change="switchModel(($event.target as HTMLSelectElement).value)"
+            title="切换模型"
+          >
+            <option v-for="m in models" :key="m.id" :value="m.id">{{ m.name }}</option>
+          </select>
+          <span v-if="modelSwitchError" class="model-switch-error">{{ modelSwitchError }}</span>
+        </div>
         <ContextStatus />
-        <button
-          class="monitor-toggle-btn"
-          :class="{ active: isMonitorOpen }"
-          @click="emit('update:isMonitorOpen', !isMonitorOpen)"
-        >
+        <button class="monitor-indicator" disabled title="实时系统状态常驻右侧">
           <MonitorPlay :size="14" :stroke-width="2" />
           <span>实时系统状态</span>
         </button>
@@ -279,6 +378,30 @@ const modeOptions: ModeOption[] = [
         @stop="abort"
       />
     </div>
+
+    <!-- 模型选择模态窗口 -->
+    <div v-if="modelPickerVisible" class="model-picker-overlay" @click.self="closeModelPicker">
+      <div class="model-picker">
+        <div class="model-picker-header">
+          <span>选择模型</span>
+          <button class="model-picker-close" @click="closeModelPicker">✕</button>
+        </div>
+        <div class="model-picker-list">
+          <button
+            v-for="m in models"
+            :key="m.id"
+            class="model-picker-item"
+            :class="{ active: m.id === currentModel }"
+            :disabled="modelPickerBusy"
+            @click="pickModel(m.id)"
+          >
+            <span class="model-picker-name">{{ m.name }}</span>
+            <span v-if="m.id === currentModel" class="model-picker-check">✓ 当前</span>
+          </button>
+        </div>
+        <div v-if="modelSwitchError" class="model-picker-error">{{ modelSwitchError }}</div>
+      </div>
+    </div>
   </section>
 </template>
 
@@ -352,7 +475,35 @@ const modeOptions: ModeOption[] = [
   gap: 12px;
 }
 
-.monitor-toggle-btn {
+.model-selector {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.model-selector select {
+  background: var(--bg-input);
+  border: 1px solid var(--border-input);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  padding: 4px 8px;
+  outline: none;
+  max-width: 180px;
+  cursor: pointer;
+}
+
+.model-selector select:focus {
+  border-color: var(--border-focus);
+}
+
+.model-switch-error {
+  color: var(--text-error);
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.monitor-indicator {
   display: flex;
   align-items: center;
   gap: 7px;
@@ -369,14 +520,14 @@ const modeOptions: ModeOption[] = [
   transition: all var(--transition-spring);
 }
 
-.monitor-toggle-btn:hover {
+.monitor-indicator:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
   transform: translateY(-1px);
   border-color: var(--border-input);
 }
 
-.monitor-toggle-btn.active {
+.monitor-indicator.active {
   background: var(--accent-soft);
   color: var(--accent-bright);
   border-color: var(--border-focus);
@@ -511,5 +662,104 @@ const modeOptions: ModeOption[] = [
 
 .mode-indicator.right {
   transform: translateX(100%);
+}
+
+/* ---------- 模型选择模态窗口 ---------- */
+.model-picker-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 200;
+}
+
+.model-picker {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg);
+  width: 360px;
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.model-picker-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--border-hairline);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-heading);
+}
+
+.model-picker-close {
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius-md);
+}
+
+.model-picker-close:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.model-picker-list {
+  padding: 10px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.model-picker-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+
+.model-picker-item:hover:not(:disabled) {
+  border-color: var(--border-focus);
+  background: var(--bg-hover);
+}
+
+.model-picker-item.active {
+  border-color: var(--accent-bright);
+  background: var(--accent-soft);
+}
+
+.model-picker-item:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.model-picker-check {
+  color: var(--accent-bright);
+  font-size: 0.72rem;
+}
+
+.model-picker-error {
+  padding: 10px 18px;
+  color: var(--text-error);
+  font-size: 0.78rem;
+  border-top: 1px solid var(--border-hairline);
 }
 </style>

@@ -1,15 +1,7 @@
 <script setup lang="ts">
-import { ref, onUnmounted, watch } from 'vue'
-import { Activity, X, Check, TriangleAlert, Radio } from 'lucide-vue-next'
+import { ref, onMounted, onUnmounted } from 'vue'
+import { Activity, Radio } from 'lucide-vue-next'
 import type { MetricsData } from '../types'
-
-const props = defineProps<{
-  isOpen: boolean
-}>()
-
-const emit = defineEmits<{
-  'close': []
-}>()
 
 const data = ref<MetricsData | null>(null)
 const loading = ref(false)
@@ -42,16 +34,10 @@ async function fetchMetrics() {
   }
 }
 
-watch(() => props.isOpen, (open) => {
-  if (open) {
-    fetchMetrics()
-    intervalId = setInterval(fetchMetrics, 3000) // 3秒刷新一次
-  } else {
-    if (intervalId) {
-      clearInterval(intervalId)
-      intervalId = null
-    }
-  }
+// 常驻：挂载即拉取，每 3 秒刷新
+onMounted(() => {
+  fetchMetrics()
+  intervalId = setInterval(fetchMetrics, 3000)
 })
 
 onUnmounted(() => {
@@ -60,15 +46,12 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="monitor-drawer" :class="{ open: isOpen }">
+  <div class="monitor-drawer">
     <div class="drawer-header">
       <div class="header-title-wrap">
         <span class="header-icon"><Activity :size="15" :stroke-width="2" /></span>
         <span class="header-title">实时系统状态</span>
       </div>
-      <button class="close-btn" @click="emit('close')" title="关闭">
-        <X :size="16" :stroke-width="2.2" />
-      </button>
     </div>
 
     <div class="drawer-content">
@@ -135,7 +118,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Swap 使用率 (omitempty) -->
+        <!-- Swap 使用率 -->
         <div v-if="data.swap_use != null" class="metric-card">
           <div class="metric-header">
             <span>Swap 使用率</span>
@@ -157,7 +140,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- 磁盘 IO 繁忙度 (omitempty) -->
+        <!-- 磁盘 IO 繁忙度 -->
         <div v-if="data.disk_io_util != null" class="metric-card">
           <div class="metric-header">
             <span>磁盘 IO 繁忙度</span>
@@ -168,7 +151,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Inode 使用率 (omitempty) -->
+        <!-- Inode 使用率 -->
         <div v-if="data.inode_use != null" class="metric-card">
           <div class="metric-header">
             <span>Inode 使用率</span>
@@ -206,36 +189,14 @@ onUnmounted(() => {
             <span class="mini-val">{{ data.network_tx?.toFixed(1) ?? '--' }} Mb/s</span>
           </div>
         </div>
-
-        <!-- TCP TIME_WAIT 和 OOM Kills (omitempty) -->
-        <div v-if="data.tcp_tw != null || data.oom_kills_1h != null" class="stats-row">
-          <div v-if="data.tcp_tw != null" class="mini-card">
-            <span class="mini-label">TCP TIME_WAIT</span>
-            <span class="mini-val">{{ data.tcp_tw.toFixed(0) }} 个</span>
-          </div>
-          <div v-if="data.oom_kills_1h != null" class="mini-card">
-            <span class="mini-label">OOM Kills (1h)</span>
-            <span class="mini-val" :style="{ color: data.oom_kills_1h > 0 ? '#ff5a6e' : 'inherit', fontWeight: data.oom_kills_1h > 0 ? 'bold' : 'normal' }">{{ data.oom_kills_1h.toFixed(0) }} 次</span>
-          </div>
-        </div>
-
-        <!-- 采集目标状态 -->
-        <div v-if="data.targets && data.targets.length > 0" class="alerts-section">
-          <span class="section-title">采集目标状态</span>
-          <div class="alerts-list">
-            <div v-for="(t, i) in data.targets" :key="i" class="alert-item" :class="t.up ? 'success' : 'warn'">
-              <span class="alert-icon" :class="t.up ? 'success' : 'warn'">
-                <Check v-if="t.up" :size="12" :stroke-width="2.6" />
-                <TriangleAlert v-else :size="12" :stroke-width="2.2" />
-              </span>
-              <div class="alert-body">
-                <span class="alert-desc">{{ t.job }}</span>
-                <span class="alert-time">{{ t.instance }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
       </template>
+
+      <!-- 无数据且非加载中 -->
+      <div v-else class="status-card">
+        <div class="indicator-group">
+          <span class="status-text">暂无数据</span>
+        </div>
+      </div>
     </div>
   </div>
 </template>
@@ -247,19 +208,10 @@ onUnmounted(() => {
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
   border-left: 1px solid var(--border-glass);
-  position: fixed;
-  right: -360px;
-  top: 0;
   height: 100vh;
-  transition: right 0.42s var(--ease-out-expo);
-  z-index: 100;
   display: flex;
   flex-direction: column;
-  box-shadow: var(--shadow-lg);
-}
-
-.monitor-drawer.open {
-  right: 0;
+  flex-shrink: 0;
 }
 
 .drawer-header {
@@ -289,65 +241,34 @@ onUnmounted(() => {
   letter-spacing: -0.01em;
 }
 
-.close-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-secondary);
-  width: 30px;
-  height: 30px;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  transition: all var(--transition-spring);
-}
-
-.close-btn:hover {
-  color: var(--text-primary);
-  background: var(--bg-hover);
-  border-color: var(--border-glass);
-  transform: rotate(90deg);
-}
-
 .drawer-content {
   padding: 18px 20px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 18px;
+  flex: 1;
 }
 
 .status-card {
   background: var(--bg-input);
   padding: 14px;
   border-radius: var(--radius-lg);
-  border: 1px solid var(--border-glass);
+  border: 1px solid var(--border-hairline);
 }
 
-.status-card.ok {
-  border-color: rgba(0, 255, 157, 0.3);
-}
-
-.status-card.warn {
-  border-color: rgba(255, 180, 84, 0.3);
-}
-
-.status-card.error {
-  border-color: rgba(255, 90, 110, 0.35);
-  background: rgba(255, 90, 110, 0.05);
-}
+.status-card.ok { border-color: rgba(74, 222, 128, 0.3); }
+.status-card.warn { border-color: rgba(250, 204, 21, 0.35); }
+.status-card.error { border-color: rgba(248, 113, 113, 0.4); }
 
 .card-title {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.66rem;
-  color: var(--text-muted);
+  font-size: 0.78rem;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
-  margin-bottom: 9px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
 }
 
 .indicator-group {
@@ -361,210 +282,91 @@ onUnmounted(() => {
   height: 8px;
   border-radius: 50%;
   background: var(--text-muted);
-  animation: pulse 1.5s infinite;
+  flex-shrink: 0;
 }
 
-.status-dot.green {
-  background: var(--accent-bright);
-  box-shadow: 0 0 8px var(--accent-glow);
-  animation: none;
-}
-
-.status-dot.yellow {
-  background: var(--text-warning);
-  box-shadow: 0 0 8px var(--text-warning);
-  animation: none;
-}
-
-.status-dot.red {
-  background: var(--text-error);
-  box-shadow: 0 0 8px var(--text-error);
-  animation: none;
-}
-
-@keyframes pulse {
-  0%,
-  100% {
-    opacity: 0.3;
-  }
-  50% {
-    opacity: 1;
-  }
-}
+.status-dot.green { background: #4ade80; box-shadow: 0 0 8px rgba(74, 222, 128, 0.6); }
+.status-dot.yellow { background: #facc15; box-shadow: 0 0 8px rgba(250, 204, 21, 0.6); }
+.status-dot.red { background: #f87171; box-shadow: 0 0 8px rgba(248, 113, 113, 0.6); }
 
 .status-text {
-  font-size: 0.8rem;
-  font-weight: 500;
+  font-size: 0.78rem;
   color: var(--text-primary);
 }
 
 .target-counts {
-  margin-top: 7px;
-  font-size: 0.7rem;
-  font-family: var(--font-mono);
+  margin-top: 8px;
+  font-size: 0.72rem;
 }
 
-.up-label {
-  color: var(--accent-bright);
-}
-
-.down-label {
-  color: var(--text-error);
-}
+.up-label { color: #4ade80; }
+.down-label { color: #f87171; }
 
 .metric-card {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
+  background: var(--bg-input);
+  padding: 12px 14px;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-hairline);
 }
 
 .metric-header {
   display: flex;
   justify-content: space-between;
+  align-items: center;
   font-size: 0.78rem;
-  color: var(--text-secondary);
+  margin-bottom: 8px;
 }
 
-.metric-val {
-  font-weight: 600;
-  color: var(--text-heading);
-  font-family: var(--font-mono);
-}
-
-.metric-sub {
-  font-size: 0.66rem;
-  color: var(--text-muted);
-  margin-top: 1px;
-  font-family: var(--font-mono);
-}
+.metric-header span:first-child { color: var(--text-secondary); }
+.metric-val { font-family: var(--font-mono); color: var(--text-primary); font-weight: 600; }
 
 .bar-bg {
-  width: 100%;
   height: 6px;
-  background: var(--bg-active);
-  border-radius: var(--radius-pill);
+  background: var(--bg-hover);
+  border-radius: 99px;
   overflow: hidden;
 }
 
 .bar-fill {
   height: 100%;
   background: var(--accent-gradient);
-  border-radius: var(--radius-pill);
+  border-radius: 99px;
   transition: width 0.5s var(--ease-out-expo);
 }
 
-.bar-fill.warning {
-  background: linear-gradient(90deg, var(--text-warning), var(--text-error));
+.bar-fill.warning { background: linear-gradient(135deg, #facc15, #f59e0b); }
+
+.metric-sub {
+  margin-top: 6px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
 }
 
 .stats-row {
-  display: flex;
-  gap: 9px;
-}
-
-.mini-card {
-  flex: 1;
-  background: var(--bg-input);
-  padding: 10px 11px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border-glass);
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-}
-
-.mini-label {
-  font-size: 0.62rem;
-  color: var(--text-muted);
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-}
-
-.mini-val {
-  font-size: 0.8rem;
-  font-weight: 700;
-  color: var(--text-heading);
-  font-family: var(--font-mono);
-}
-
-.alerts-section {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
   gap: 10px;
 }
 
-.section-title {
-  font-size: 0.66rem;
-  font-weight: 600;
+.mini-card {
+  background: var(--bg-input);
+  border: 1px solid var(--border-hairline);
+  border-radius: var(--radius-lg);
+  padding: 10px;
+  text-align: center;
+}
+
+.mini-label {
+  display: block;
+  font-size: 0.68rem;
   color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
+  margin-bottom: 4px;
 }
 
-.alerts-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.alert-item {
-  display: flex;
-  gap: 9px;
-  padding: 9px 11px;
-  border-radius: var(--radius-md);
-  font-size: 0.75rem;
-  border: 1px solid var(--border-glass);
-}
-
-.alert-item.warn {
-  background: rgba(255, 180, 84, 0.06);
-  border-color: rgba(255, 180, 84, 0.2);
-}
-
-.alert-item.success {
-  background: rgba(0, 255, 157, 0.05);
-  border-color: rgba(0, 255, 157, 0.2);
-}
-
-.alert-icon {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  flex-shrink: 0;
-}
-
-.alert-icon.success {
-  background: var(--accent-soft);
-  color: var(--accent-bright);
-}
-
-.alert-icon.warn {
-  background: rgba(255, 180, 84, 0.15);
-  color: var(--text-warning);
-}
-
-.alert-body {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  overflow: hidden;
-}
-
-.alert-desc {
-  color: var(--text-primary);
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.alert-time {
-  font-size: 0.64rem;
-  color: var(--text-muted);
+.mini-val {
   font-family: var(--font-mono);
+  font-size: 0.82rem;
+  color: var(--text-primary);
 }
 </style>

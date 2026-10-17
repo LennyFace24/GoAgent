@@ -2,6 +2,8 @@ package commands
 
 import (
 	"sync"
+
+	"github.com/LennyFace24/MiniAgent/internal/skills"
 )
 
 // ---------- 命令注册中心 ----------
@@ -22,6 +24,8 @@ func GetRegistry() *Registry {
 	once.Do(func() {
 		globalRegistry = &Registry{}
 		registerBuiltinCommands(globalRegistry)
+		LoadFileCommands(globalRegistry)
+		RegisterSkillCommands(globalRegistry, skills.NewSkillRegistry())
 	})
 	return globalRegistry
 }
@@ -31,6 +35,13 @@ func (r *Registry) Register(cmd Command) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.commands = append(r.commands, cmd)
+}
+
+// RegisterAll 批量注册命令
+func (r *Registry) RegisterAll(cmds []Command) {
+	for _, cmd := range cmds {
+		r.Register(cmd)
+	}
 }
 
 // List 获取所有命令
@@ -54,4 +65,10 @@ func (r *Registry) Find(name string) (Command, bool) {
 		}
 	}
 	return Command{}, false
+}
+
+// Has 判断命令是否存在（供 file-based/skill 命令去重）
+func (r *Registry) Has(name string) bool {
+	_, ok := r.Find(name)
+	return ok
 }

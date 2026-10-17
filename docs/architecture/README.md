@@ -1,53 +1,120 @@
-﻿# GoAgent (MiniAgent) 项目真实架构总览与占位符清单
-
-本文件是对当前项目物理代码库的实事求是架构总结。为了方便开发者快速掌握当前哪些模块属于真实已可用状态、哪些模块在代码中仅作为骨架或完全未集成，特此提供此真实架构树。
+# GoAgent (MiniAgent) 项目真实架构总览
 
 ---
 
 ## 1. 当前项目物理文件图 (Code Map)
 
-`
+```
 GoAgent/
 ├── cmd/
-│   └── main.go                    # 程序入口 (已实现)
+│   ├── main.go                    # 程序入口（gin 装配：CORS/sessions/SessionID + 路由）
+│   └── sandbox-server/            # 远程沙箱服务（docker 容器创建/执行/销毁）
 ├── internal/
-│   ├── config/
-│   │   └── config.go              # 配置加载 (已实现)
-│   ├── handler/
-│   │   ├── routes.go              # 路由注册与初始化 (已实现，未注册/chat与/task)
-│   │   ├── chat_stream_handler.go # SSE 聊天控制层 (已实现)
-│   │   ├── aiops_handler.go       # AIOps 诊断控制层 (已实现，复用单Agent逻辑)
-│   │   └── file_handler.go        # 知识库管理接口 (已实现)
+│   ├── modelmgr/                  # ★ 模型管理（新增）
+│   │   ├── model.go               # Model 结构 + ContextBudgetTokens + eino 构建
+│   │   ├── registry.go            # model.json 运行时加载 + 分级校验错误
+│   │   ├── modelset.go            # ★ 每服务 Model 对象（currentID + 惰性构建 + Switch）
+│   │   └── registry_test.go       # 加载/校验/切换测试
+│   ├── pipeline/                  # ★ 消息预处理管线（新增）
+│   │   ├── pipeline.go            # MessageContext + Stage 接口 + Pipeline.Run
+│   │   ├── event_bus.go           # 事件总线（pre_process / pre_send / post_send hook）
+│   │   ├── skill_expand_stage.go  # 阶段3：skill 触发词匹配注入
+│   │   ├── model_prep_stage.go    # 阶段4：模型实例与认证准备
+│   │   ├── compact_check_stage.go # 阶段5：历史预算预检压缩
+│   │   ├── context_build_stage.go # 阶段6：ContextManager 组装 slots + BuildMessages
+│   │   └── send_stage.go          # 阶段7：管线终点
+│   ├── commands/                  # ★ 斜杠命令系统（重构）
+│   │   ├── types.go               # Command + ArgsPolicy（none/optional/required）+ Handler
+│   │   ├── registry.go            # 注册中心（内置 + file-based + skill 命令）
+│   │   ├── builtin.go             # 内置命令：compact/context/model（server handler）
+│   │   ├── file_based.go          # ~/.claude/commands markdown 模板命令（递归+foo:bar 别名）
+│   │   └── skill_commands.go      # /skill:<name> 命令注册
+│   ├── skills/                    # ★ skill 系统（重构）
+│   │   ├── registry.go            # 多来源扫描：.agents/skills + ~/.claude/skills
+│   │   ├── parser.go              # frontmatter 解析（支持折叠/字面块标量 >- |）
+│   │   └── route.md               # 已废弃（不再作为索引，保留占位）
+│   ├── handler/                   # HTTP 控制层
+│   │   ├── routes.go              # ★ 依赖注入重构：Handlers + SetupRoutesWith
+│   │   ├── agent_handler.go       # Stream（SSE）+ PermissionResponse（always 生效）
+│   │   ├── command_handler.go     # ★ /api/commands/execute（落库 user 原文 + assistant 结果）
+│   │   ├── conversation_handler.go# 会话 CRUD
+│   │   ├── file_handler.go        # 上传/检索
+│   │   ├── metrics_handler.go     # 系统指标
+│   │   └── routes_test.go         # ★ 路由表 + 端点行为测试（新增）
 │   ├── service/
-│   │   ├── chat_stream_service.go # 单 Agent 流式 ReAct 执行引擎 (已实现)
-│   │   └── aiops_service.go       # AIOps 单 Agent 模拟分析服务 (已实现)
-│   ├── task/
-│   │   └── task.go                # [⚠️ 占位符] 任务系统空骨架，未实现
+│   │   ├── agent_service.go       # ★ Stream 接入预处理管线 + runLoop（ReAct 20 轮）
+│   │   └── file_service.go        # 知识库处理（Chroma RAG）
+│   ├── context/
+│   │   └── manager.go             # ContextManager：slot 组装（system_prompt/soul/skills/...）
 │   ├── tools/
-│   │   ├── tool_handler.go        # 工具注册中心 (已实现，未注册/task)
-│   │   ├── basic_tool/
-│   │   │   ├── bash_tool.go       # Bash 执行 (已实现)
-│   │   │   └── file_tools.go      # 文件读写 (已实现)
-│   │   └── extra_tool/
-│   │       ├── diagnostic_tool.go # Prometheus 查询 (已实现)
-│   │       ├── knowledge_tool.go  # ChromaDB RAG 检索 (已实现)
-│   │       ├── todo_tool.go       # [⚠️ 未集成] 待办事项，未加入 tool_handler
-│   │       └── task_tool.go       # 临时子 Agent 代理 (SubProxy) 工具 (已实现)
-└── docs/
-    └── architecture/              # 架构分解专栏 (已校准)
-`
+│   │   ├── tool_handler.go        # ★ 注册 16 工具（新增 write_todo/read_todo）
+│   │   ├── context_tool/          # compact（全局触发器）/ context_status / token 估算
+│   │   ├── basic_tool/            # bash（安全校验）/ read/write/edit 文件
+│   │   ├── extra_tool/            # health_check / knowledge_search / subproxy / todo
+│   │   └── sandbox_tool/          # 远程容器沙箱
+│   ├── permission/                # 规则匹配 + bash AST 只读分析 + pending 决策
+│   ├── task/                      # 任务工具（.tasks/ JSON 持久化）
+│   ├── config/                    # config.yaml 加载
+│   ├── middleware/                # CORS / SessionID
+│   ├── store/                     # ConversationStore（JSONL）/ ChromaStore
+│   ├── mcp/                       # MCP 配置（未启用动态加载）
+│   └── metrics/                   # gopsutil 收集器
+├── frontend/                      # Vue3 + Vite + TS
+│   └── src/features/chat/
+│       ├── composables/useChat.ts # SSE 流处理 + 跨会话缓冲
+│       └── components/ChatWorkspace.vue # ★ 命令分流（client/builtin/file/skill/未命中）
+├── data/                          # conversations/ transcripts/ soul.md memory.md
+└── permission.json                # allow/ask/deny 规则（always 持久化目标）
+```
 
----
+## 2. 消息预处理管线（internal/pipeline）
 
-## 2. 核心功能及占位符状态表 (Status Board)
+```
+用户输入 → 1.CommandCheck（命令已在 handler 层短路）→ 2.EventTrigger（hook 链）
+        → 3.SkillExpand（触发词匹配注入）→ 4.ModelPrep（模型/认证）
+        → 5.CompactCheck（历史预算预检）→ 6.ContextBuild（slots 组装）
+        → 7.Send（runLoop 消费）
+```
 
-| 核心组件 | 物理文件路径 | 当前代码真实状态 |
+- 命令命中（builtin/file-based/skill）由前端调 `/api/commands/execute` 短路，不进管线。
+- runLoop 内的每轮 compact 检查保留，与阶段 5 预检并存（预检保证首轮不超载）。
+
+## 3. 斜杠命令系统（对齐 omp 分层）
+
+| 层 | 来源 | 语义 |
+|---|---|---|
+| builtin | Go handler（compact/context/model） | 立即执行，结果落库为 assistant，不进 LLM |
+| client | 前端本地（clear/help） | 不进上下文 |
+| file-based | `~/.claude/commands/**/*.md` + `<cwd>/.claude/commands/` | 模板渲染（`$1 $ARGUMENTS`）后作为消息发 LLM |
+| skill | `/skill:<name>`（`~/.claude/skills` + `.agents/skills` 扫描） | 注入 skill 全文作为消息发 LLM |
+| 未命中 | — | `/xxx` 原样进管线（与 omp 一致不拒绝） |
+
+**命令消息进上下文**：`/xxx` 原文落库为 user，builtin 结果落库为 assistant。
+
+## 4. Skill 来源（多 provider 直接读取，零迁移）
+
+- `~/.claude/skills/<name>/SKILL.md`（user 级，复用现有 skill）
+- `.agents/skills/<name>/SKILL.md`（project 级，可进 git，优先级最高）
+- 同名冲突：project > user，高优先级胜出并告警。
+
+## 5. 核心功能状态表
+
+| 核心组件 | 位置 | 状态 |
 | :--- | :--- | :--- |
-| **流式智能问答 (ChatStream)** | internal/service/chat_stream_service.go | **已完成**。提供 Eino + ReAct 单 Agent 20回合循环与 SSE 流式事件推送。 |
-| **AIOps 智能诊断 (aiops)** | internal/service/aiops_service.go | **已完成**。实质上复用了单 Agent 控制层并注入了 AIOps 系统提示。 |
-| **安全过滤与审计 (bash/file)**| internal/tools/basic_tool/ | **已完成**。支持敏感 Shell 拦截，以及路径沙箱隔离。 |
-| **待办提示机制 (todo_tool)**  | internal/tools/extra_tool/todo_tool.go| **代码已实现，未集成**。由于 	ool_handler.go 未装配，导致流式服务 5 回合强提示报错。 |
-| **任务依赖调度图 (task)**     | internal/task/task.go | **纯空代码占位符 (Skeleton)**。仅定义了空结构体与未填充空方法，未实际实现，且未暴露 Eino 工具和注入 	ool_handler.go。 |
-| **多智能体团队 (AgentTeam)**  | internal/tools/extra_tool/task_tool.go| **仅有 SubProxy 占位模拟**。无独立的 Planner/Executor 双 Agent 协同层，仅提供了能派生一个 SubAgent 进行递归调用的 subproxy 工具。 |
-| **持久化长期记忆 (Memory)**   | *无* | **完全空缺设计占位符**。代码中无对应包与目录，属于纯概念规划，当前暂不存在。 |
-| **MCP Server 自由导入 (mcp)** | *无* | **完全空缺设计占位符**。代码中无对应包与目录，属于纯概念规划，当前暂不存在。 |
+| 消息预处理管线 | internal/pipeline/ | **已实现**（7 步，命令短路在 handler 层） |
+| 斜杠命令系统 | internal/commands/ | **已实现**（builtin/file-based/skill 分层） |
+| skill 来源 | internal/skills/ | **已实现**（~/.claude/skills + .agents/skills 扫描） |
+| **模型管理** | internal/modelmgr/ | **已实现**（model.json 运行时加载 + 每服务 ModelSet + 切换 API） |
+| 流式智能问答 | internal/service/agent_service.go | **已实现**（runLoop 20 轮 + SSE） |
+| 命令消息落库 | internal/handler/command_handler.go | **已实现**（user 原文 + assistant 结果） |
+| todo 工具 | internal/tools/extra_tool/todo_tool.go | **已注册启用**（write_todo/read_todo） |
+| permission always | internal/permission/ | **已实现**（AddRule + 持久化 permission.json） |
+| 后端路由测试 | internal/handler/routes_test.go | **已实现**（路由表 + 端点行为） |
+| 多智能体团队 (AgentTeam) | internal/tools/extra_tool/subproxy_tool.go | 仅有 SubProxy 占位模拟 |
+| MCP 动态加载 | internal/mcp/ | 配置层存在，未启用运行时加载 |
+
+## 6. 已知待办/限制
+
+- `internal/skills/route.md` 已废弃（保留占位，不再做索引）。
+- `~/.claude/commands` 的 file-based 命令依赖用户本机目录，CI/无此目录环境静默跳过。
+- pipeline 的 EventBus 目前仅内置钩子，插件动态加载未启用（Windows 不支持 Go plugin .so）。

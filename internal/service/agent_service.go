@@ -8,15 +8,15 @@ import (
 	"strings"
 	"time"
 
-	cfg "github.com/LennyFace24/MiniAgent/internal/config"
 	ctxmgr "github.com/LennyFace24/MiniAgent/internal/context"
+	"github.com/LennyFace24/MiniAgent/internal/modelmgr"
 	"github.com/LennyFace24/MiniAgent/internal/permission"
+	"github.com/LennyFace24/MiniAgent/internal/pipeline"
 	"github.com/LennyFace24/MiniAgent/internal/skills"
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
 	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 
-	"github.com/cloudwego/eino-ext/components/model/openai"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
@@ -39,60 +39,46 @@ type ToolEvent struct {
 // AgentService 统一的 Agent 服务，根据 mode 选择不同的 prompt 和行为
 type AgentService struct {
 	store          *store.ConversationStore
-	baseModel      model.BaseChatModel
-	toolModel      model.ToolCallingChatModel
+	models         *modelmgr.ModelSet // 本服务特有的模型集合（每服务一个实例，非全局）
 	tools          []tool.BaseTool
 	compactTrigger *contexttool.CompactTrigger
 	perms          *permission.PermissionManager
-	budget         int64 // 上下文 token 预算（ContextBudgetTokens）
+	budget         int64 // 上下文 token 预算（当前激活模型的 ContextBudgetTokens）
 	skillReg       *skills.SkillRegistry
 }
 
-func NewAgentService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore) *AgentService {
-	compactTrigger := toolHandler.CompactTrigger
-	maxTokens := cfg.GetConfig().Llm.MaxTokens
-	chatModel, err := openai.NewChatModel(context.Background(), &openai.ChatModelConfig{
-		Model:               cfg.GetConfig().Llm.Model,
-		APIKey:              cfg.GetConfig().Llm.ApiKey,
-		BaseURL:             cfg.GetConfig().Llm.BaseUrl,
-		MaxCompletionTokens: &maxTokens,
-	})
-	if err != nil {
-		log.Printf("AgentService: ChatModel创建失败 %v", err)
-		return nil
-	}
-
+// NewAgentService 创建 AgentService，注入服务级 ModelSet（registry 由 main 从 model.json 加载）。
+func NewAgentService(toolHandler *tools.ToolHandler, convStore *store.ConversationStore, registry *modelmgr.Registry) *AgentService {
 	tools_ := toolHandler.Tools()
-	toolInfos := make([]*schema.ToolInfo, len(tools_))
-	for i, t := range tools_ {
-		info, infoErr := t.Info(context.Background())
-		if infoErr != nil {
-			log.Printf("AgentService: 获取工具信息失败 %v", infoErr)
-			return nil
-		}
-		toolInfos[i] = info
-	}
-
-	toolModel, err := chatModel.WithTools(toolInfos)
-	if err != nil {
-		log.Printf("AgentService: 绑定工具失败 %v", err)
-		return nil
-	}
+	models := modelmgr.NewModelSet(registry, tools_)
 
 	return &AgentService{
 		store:          convStore,
-		baseModel:      chatModel,
-		toolModel:      toolModel,
+		models:         models,
 		tools:          tools_,
-		compactTrigger: compactTrigger,
+		compactTrigger: toolHandler.CompactTrigger,
 		perms:          permission.NewPermissionManager(permission.ModeDefault),
-		budget:         cfg.GetConfig().ContextBudgetTokens(),
+		budget:         models.Current().ContextBudgetTokens(),
 		skillReg:       skills.NewSkillRegistry(),
 	}
-
 }
 
-// Stream 启动流式 Agent 对话，mode 支持 "chat" 和 "aiops"
+// ModelSet 暴露服务级模型集合（供 handler 层切换/查询）
+func (s *AgentService) ModelSet() *modelmgr.ModelSet {
+	return s.models
+}
+
+// SwitchModel 切换当前模型（供切换端点调用）
+func (s *AgentService) SwitchModel(ctx context.Context, id string) error {
+	if err := s.models.Switch(ctx, id); err != nil {
+		return err
+	}
+	contexttool.GetContextState().ConfigureMaxTokens(s.budget)
+	return nil
+}
+
+// Stream 启动流式 Agent 对话，mode 支持 "chat" 和 "aiops"。
+// 消息经预处理管线（skill 匹配 → 模型准备 → 压缩预检 → 上下文组装）后进入 runLoop。
 func (s *AgentService) Stream(ctx context.Context,
 	mode string, sessionID string, conversationID string, userMsg string) (*adk.AsyncIterator[*adk.AgentEvent], chan ToolEvent, error) {
 
@@ -102,18 +88,6 @@ func (s *AgentService) Stream(ctx context.Context,
 		history = nil
 	}
 
-	// 构建上下文
-	cm := ctxmgr.New(s.budget, s.skillReg)
-	cm.SetMode(mode)
-	cm.LoadSystemInfo()
-	cm.LoadSoul()
-	cm.LoadProjectContext()
-	cm.LoadSkills()
-	cm.LoadMemory()
-
-	history = cm.BuildHistory(ctx, history, s.baseModel, sessionID, conversationID)
-	messages := cm.BuildMessages(history, userMsg)
-
 	// 每次请求创建独立的 ContextState，避免跨对话污染
 	ctxState := contexttool.NewContextState(s.budget)
 
@@ -121,10 +95,65 @@ func (s *AgentService) Stream(ctx context.Context,
 	globalState := contexttool.GetContextState()
 	globalState.ConfigureMaxTokens(s.budget)
 
+	// 组装预处理管线：skill 触发词匹配 → 模型准备 → 压缩预检 → 上下文组装
+	pl := pipeline.New(
+		pipeline.NewSkillExpandStage(func(text string) (*skills.SkillDocument, bool) {
+			doc := s.skillReg.Match(text)
+			if doc == nil {
+				return nil, false
+			}
+			return doc, true
+		}),
+		pipeline.NewModelPrepStage(nil, s.buildToolModel),
+		pipeline.NewCompactCheckStage(s.baseModel()),
+		pipeline.NewContextBuildStage(func(mc *pipeline.MessageContext) *ctxmgr.ContextManager {
+			cm := ctxmgr.New(mc.CtxState.MaxTokens(), s.skillReg)
+			return cm
+		}),
+		pipeline.NewSendStage(),
+	)
+
+	mc := &pipeline.MessageContext{
+		Raw:            userMsg,
+		Mode:           mode,
+		SessionID:      sessionID,
+		ConversationID: conversationID,
+		History:        history,
+		CtxState:       ctxState,
+	}
+	if err := pl.Run(ctx, mc); err != nil {
+		return nil, nil, err
+	}
+
 	iterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
 	toolEvents := make(chan ToolEvent, 64)
-	go s.runLoop(ctx, mode, messages, generator, toolEvents, sessionID, conversationID, ctxState, globalState)
+	go s.runLoop(ctx, mode, mc.Messages, generator, toolEvents, sessionID, conversationID, ctxState, globalState)
 	return iterator, toolEvents, nil
+}
+
+// baseModel 返回当前激活模型的 ChatModel（惰性构建）
+func (s *AgentService) baseModel() model.BaseChatModel {
+	cm, err := s.models.ChatModel(context.Background())
+	if err != nil {
+		log.Printf("AgentService: ChatModel 构建失败 %v", err)
+		return nil
+	}
+	return cm
+}
+
+// toolModel 返回当前激活模型的带工具模型（惰性构建）
+func (s *AgentService) toolModel() model.ToolCallingChatModel {
+	tm, err := s.models.ToolModel(context.Background())
+	if err != nil {
+		log.Printf("AgentService: ToolModel 构建失败 %v", err)
+		return nil
+	}
+	return tm
+}
+
+// buildToolModel 构建带工具调用的模型（供管线 ModelPrep 阶段使用）
+func (s *AgentService) buildToolModel(ctx context.Context) (model.ToolCallingChatModel, error) {
+	return s.models.ToolModel(ctx)
 }
 
 // collectTurn 读取一轮模型流，推送 thinking_delta/delta 事件到 toolEvents，
@@ -196,12 +225,12 @@ func (s *AgentService) runLoop(
 		}
 		switch level {
 		case contexttool.CompactFull:
-			messages = contexttool.CompactFunc(ctx, messages, s.baseModel, sessionID, conversationID)
+			messages = contexttool.CompactFunc(ctx, messages, s.baseModel(), sessionID, conversationID)
 		case contexttool.CompactMicro:
 			messages = contexttool.MicroCompactFunc(messages)
 		}
 
-		stream, err := s.toolModel.Stream(ctx, messages)
+		stream, err := s.toolModel().Stream(ctx, messages)
 		if err != nil {
 			gen.Send(&adk.AgentEvent{Err: err})
 			return
@@ -238,12 +267,11 @@ func (s *AgentService) runLoop(
 					break
 				}
 			}
-			if !useTodo {
-				todoUncalledCount++
-			}
-			if !useTodo && todoUncalledCount >= 5 {
+			if useTodo {
+				// 调用过 todo 工具，重置未调用计数，避免误提醒
 				todoUncalledCount = 0
-				// 将在工具结果中注入提醒
+			} else {
+				todoUncalledCount++
 			}
 		}
 
@@ -254,7 +282,7 @@ func (s *AgentService) runLoop(
 		}
 		messages = append(messages, fullMsg)
 
-		needReminder := mode != "aiops" && todoUncalledCount == 0
+		needReminder := mode != "aiops" && todoUncalledCount >= 5
 
 		for _, tc := range toolCalls {
 			toolEvents <- ToolEvent{
@@ -291,7 +319,7 @@ func (s *AgentService) runLoop(
 				}
 
 				select {
-				case approved := <-permission.WaitForDecision(reqID, sessionID, conversationID):
+				case approved := <-permission.WaitForDecision(reqID, sessionID, conversationID, tc.Function.Name):
 					if approved {
 						result, _ = s.executeTool(ctx, tc)
 						s.perms.ResetDenials()
@@ -322,6 +350,7 @@ func (s *AgentService) runLoop(
 
 			if needReminder {
 				result = result + "\n\n[系统提醒] 你已经连续多轮未更新待办事项，请立即调用 read_todo 和 write_todo 更新当前任务进度。"
+				todoUncalledCount = 0
 				needReminder = false
 			}
 
@@ -344,7 +373,7 @@ func (s *AgentService) runLoop(
 		ctxState.EstimateAndEstimateMessages(messages)
 		globalState.SetTokens(ctxState.GetUsage().CurrentTokens)
 	}
-	stream, err := s.toolModel.Stream(ctx, messages)
+	stream, err := s.toolModel().Stream(ctx, messages)
 	if err != nil {
 		gen.Send(&adk.AgentEvent{Err: err})
 		return
@@ -374,4 +403,9 @@ func (s *AgentService) SaveReply(ctx context.Context, sessionID, conversationID 
 	if err := s.store.SaveMessages(sessionID, conversationID, msgs...); err != nil {
 		log.Printf("AgentService: 保存对话失败 %v", err)
 	}
+}
+
+// PermissionManager 暴露权限管理器，供 handler 层写入"始终允许"规则。
+func (s *AgentService) PermissionManager() *permission.PermissionManager {
+	return s.perms
 }

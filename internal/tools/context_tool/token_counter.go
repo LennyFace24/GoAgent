@@ -27,12 +27,13 @@ const (
 )
 
 // ShouldCompact 根据传入的 ContextState 判断是否需要压缩。
-// 阈值基于预算百分比，不再依赖绝对 token 数。
+// 阈值基于预算百分比。首次调用（或消息已变化）时重新估算。
 func ShouldCompact(messages []*schema.Message, state *ContextState) CompactLevel {
 	usage := state.GetUsage()
 
-	// 首次调用时 currentTokens 可能为 0，先估算一次
-	if usage.CurrentTokens == 0 {
+	// 估算当前消息集（幂等：每次调用都基于消息实际内容重算，
+	// 避免 currentTokens==0 与"消息确实为空"混淆导致的不稳定压缩）
+	if len(messages) > 0 {
 		tokens := EstimateTokens(messages)
 		state.SetTokens(int64(tokens))
 		usage = state.GetUsage()

@@ -21,7 +21,7 @@ let interval: ReturnType<typeof setInterval> | null = null
 
 async function fetchContextStatus() {
   try {
-    const res = await fetch('/context')
+    const res = await fetch('/api/context/status')
     if (res.ok) {
       const data = await res.json()
       usage.value = data

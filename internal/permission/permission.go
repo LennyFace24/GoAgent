@@ -258,3 +258,30 @@ func (pm *PermissionManager) GetRules() []Rule {
 	copy(rules, pm.rules)
 	return rules
 }
+
+// PersistAlwaysAllow 将工具名写入 permission.json 的 allow 列表（去重后落盘），
+// 使"始终允许"在重启后仍然生效。
+func PersistAlwaysAllow(path, toolName string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+
+	var file permissionFile
+	if err := json.Unmarshal(data, &file); err != nil {
+		return err
+	}
+
+	for _, v := range file.Permissions.Allow {
+		if v == toolName {
+			return nil // 已存在，无需重复写入
+		}
+	}
+
+	file.Permissions.Allow = append(file.Permissions.Allow, toolName)
+	out, err := json.MarshalIndent(file, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, out, 0644)
+}

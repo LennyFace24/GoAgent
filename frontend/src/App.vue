@@ -13,7 +13,6 @@ import MonitorDrawer from './features/tools/components/MonitorDrawer.vue'
 // 1. Cherry Studio 多层布局状态管理
 const activeNav = ref<string>('chat')
 const activeConversationId = ref<string>('default')
-const isMonitorOpen = ref<boolean>(false)
 const dashboardView = ref<string>('overview')
 
 function onSelect(id: string): void {
@@ -63,14 +62,14 @@ onMounted(async () => {
       <ChatWorkspace
         v-if="activeNav !== 'dashboard' && activeConversationId !== ''"
         :conversationId="activeConversationId"
-        v-model:isMonitorOpen="isMonitorOpen"
       />
       <EmptyConversations v-else-if="activeNav !== 'dashboard' && activeConversationId === ''" />
       <DashboardView v-else :view="dashboardView" />
     </keep-alive>
 
-    <!-- 第四栏：监控滑出抽屉 (Monitor Drawer) -->
-    <MonitorDrawer :isOpen="isMonitorOpen" @close="isMonitorOpen = false" />
+    <!-- 第四栏：实时系统状态（常驻右侧） -->
+    <MonitorDrawer />
+
   </div>
 </template>
 

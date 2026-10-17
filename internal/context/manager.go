@@ -139,6 +139,11 @@ func (cm *ContextManager) setSlot(tag, content string, order int) {
 	cm.slots = append(cm.slots, Slot{Tag: tag, Content: content, Order: order})
 }
 
+// AppendSlot 追加或更新一个 slot（供管线注入动态内容，如激活的 skill）
+func (cm *ContextManager) AppendSlot(tag, content string, order int) {
+	cm.setSlot(tag, content, order)
+}
+
 // --- 历史消息处理 ---
 
 // BuildHistory 处理历史消息，超预算时压缩

@@ -20,14 +20,6 @@ type Config struct {
 		Host string `yaml:"host"`
 		Port string `yaml:"port"`
 	} `yaml:"server"`
-	Llm struct {
-		BaseUrl            string `yaml:"base_url"`
-		ApiKey             string `yaml:"api_key"`
-		Model              string `yaml:"model"`
-		ContextWindow      int    `yaml:"context_window"`
-		MaxTokens          int    `yaml:"max_completion_tokens"`
-		SafetyMarginTokens int    `yaml:"safety_margin_tokens"`
-	} `yaml:"llm"`
 	Embedding struct {
 		BaseUrl string `yaml:"base_url"`
 		ApiKey  string `yaml:"api_key"`
@@ -47,8 +39,6 @@ type Config struct {
 	} `yaml:"sandbox"`
 }
 
-const DefaultContextWindow = 200_000
-
 func (c *Config) ApplyDefaults() {
 	if c == nil {
 		return
@@ -61,15 +51,6 @@ func (c *Config) ApplyDefaults() {
 	if c.Server.Port == "" {
 		c.Server.Port = "8080"
 	}
-	if c.Llm.ContextWindow <= 0 {
-		c.Llm.ContextWindow = DefaultContextWindow
-	}
-	if c.Llm.MaxTokens < 0 {
-		c.Llm.MaxTokens = 0
-	}
-	if c.Llm.SafetyMarginTokens < 0 {
-		c.Llm.SafetyMarginTokens = 0
-	}
 	if c.Workspace.Root == "" {
 		c.Workspace.Root = "."
 	}
@@ -78,32 +59,11 @@ func (c *Config) ApplyDefaults() {
 	}
 }
 
-func (c *Config) ContextBudgetTokens() int64 {
-	if c == nil {
-		return DefaultContextWindow
-	}
-
-	c.ApplyDefaults()
-	budget := c.Llm.ContextWindow - c.Llm.MaxTokens - c.Llm.SafetyMarginTokens
-	if budget <= 0 {
-		return int64(c.Llm.ContextWindow)
-	}
-	return int64(budget)
-}
-
-// Validate 校验必填字段，缺失时返回明确错误，避免延迟到 LLM 调用时才报错。
+// Validate 校验必填字段。LLM 配置已移至 model.json（见 internal/modelmgr），
+// 此处不再校验 llm 段。
 func (c *Config) Validate() error {
 	if c == nil {
 		return fmt.Errorf("config is nil")
-	}
-	if c.Llm.BaseUrl == "" {
-		return fmt.Errorf("llm.base_url 不能为空")
-	}
-	if c.Llm.ApiKey == "" {
-		return fmt.Errorf("llm.api_key 不能为空")
-	}
-	if c.Llm.Model == "" {
-		return fmt.Errorf("llm.model 不能为空")
 	}
 	if c.Session.SecretKey == "" {
 		return fmt.Errorf("session.secret_key 不能为空")

@@ -2,12 +2,18 @@ import { ref, computed, onMounted } from 'vue'
 
 // ---------- 斜杠命令 composable ----------
 
+export type CommandType = 'client' | 'server'
+export type ArgsPolicy = 'none' | 'optional' | 'required'
+
 export interface Command {
   name: string
   description: string
   usage: string
   category: string
-  type: 'client' | 'server'
+  type: CommandType
+  args_policy?: ArgsPolicy
+  args_hint?: string
+  source?: string
 }
 
 export function useCommands() {
