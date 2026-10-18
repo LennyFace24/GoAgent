@@ -14,6 +14,12 @@ services:
       - "8080:8080"
     volumes:
       - ./config.docker.yaml:/app/config.yaml:ro
+      - type: bind
+        source: ./model.json
+        target: /app/model.json
+        read_only: true
+        bind:
+          create_host_path: false
       - ./internal/skills:/app/internal/skills:ro
       - goagent-data:/app/data
     depends_on:

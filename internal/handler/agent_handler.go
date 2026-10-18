@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/LennyFace24/MiniAgent/internal/permission"
@@ -14,9 +15,6 @@ import (
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
-
-
-
 
 type AgentHandler struct {
 	service *service.AgentService
@@ -68,7 +66,10 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 	c.Writer.Header().Set("Transfer-Encoding", "chunked")
 
 	// 写 SSE 事件的辅助函数
+	var writeMu sync.Mutex
 	writeSSE := func(event string, data string) {
+		writeMu.Lock()
+		defer writeMu.Unlock()
 		fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", event, data)
 		c.Writer.Flush()
 	}
@@ -181,8 +182,6 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 		}
 
 	}
-
-
 
 	// 正常结束：持久化完整对话
 	persist(false)

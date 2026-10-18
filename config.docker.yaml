@@ -1,13 +1,7 @@
+# 对话模型配置位于 model.json；embedding 配置仍由本文件加载。
 server:
     host: 0.0.0.0
     port: 8080
-llm:
-    base_url: https://your-api.com/v1/
-    api_key: your-api-key
-    model: your-model
-    context_window: 200000
-    max_completion_tokens: 8192
-    safety_margin_tokens: 4096
 embedding:
     base_url: https://your-embedding.com/v1
     api_key: your-api-key

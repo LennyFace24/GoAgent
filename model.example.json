@@ -1,0 +1,14 @@
+{
+  "default": "your-model",
+  "models": [
+    {
+      "id": "your-model",
+      "name": "默认对话模型",
+      "base_url": "https://your-api.com/v1",
+      "api_key": "your-api-key",
+      "context_window": 200000,
+      "max_completion_tokens": 8192,
+      "safety_margin_tokens": 4096
+    }
+  ]
+}

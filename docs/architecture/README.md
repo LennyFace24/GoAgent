@@ -19,10 +19,9 @@ GoAgent/
 │   │   ├── pipeline.go            # MessageContext + Stage 接口 + Pipeline.Run
 │   │   ├── event_bus.go           # 预留的进程内同步 Hook 分发器，未接入请求链路
 │   │   ├── skill_expand_stage.go  # 阶段3：skill 触发词匹配注入
-│   │   ├── model_prep_stage.go    # 阶段4：模型实例与认证准备
-│   │   ├── compact_check_stage.go # 阶段5：历史预算预检压缩
-│   │   ├── context_build_stage.go # 阶段6：ContextManager 组装 slots + BuildMessages
-│   │   └── send_stage.go          # 阶段7：管线终点
+│   │   ├── model_prep_stage.go    # 请求级模型与预算快照
+│   │   ├── compact_check_stage.go # 完整上下文预算检查与分级压缩
+│   │   └── context_build_stage.go # 组装 slots + history + user
 │   ├── commands/                  # ★ 斜杠命令系统（重构）
 │   │   ├── types.go               # Command + ArgsPolicy（none/optional/required）+ Handler
 │   │   ├── registry.go            # 注册中心（内置 + file-based + skill 命令）
@@ -69,13 +68,15 @@ GoAgent/
 ## 2. 消息预处理管线（internal/pipeline）
 
 ```
-用户输入 → SkillExpand（触发词匹配）→ ModelPrep（模型准备）
-        → CompactCheck（历史预算预检）→ ContextBuild（slots 组装）
-        → Send → runLoop
+用户输入 → SkillExpand（触发词匹配）→ ModelPrep（模型和预算快照）
+        → ContextBuild（slots + 历史 + 当前输入）→ CompactCheck（完整消息预算预检）
+        → Stream 启动 runLoop（复用请求快照）
 ```
 
 - 命令命中（builtin/file-based/skill）由前端调 `/api/commands/execute` 短路，不进管线。
-- runLoop 内的每轮 compact 检查保留，与阶段 5 预检并存（预检保证首轮不超载）。
+- `pl.Run(ctx, mc)` 顺序调用 Stage；`mc.ToolModel`、`mc.ChatModel` 和本次 Token 预算由 ModelSet 在同一次选型锁内获取，runLoop 复用它们。模型切换只影响后续请求，不会在一次工具循环中途换模型或预算；模型配置文件热加载仍未实现。
+- ContextBuild 先组装完整消息，CompactCheck 再根据完整消息执行微压缩或摘要压缩，完整压缩使用无工具绑定的摘要模型并保留系统消息、近期历史和当前输入。runLoop 首轮不重复压缩相同输入；工具结果加入后再检查。压缩可能因历史太短或摘要失败而保留原文，不宣称能绝对保证不超窗。
+- 与原七步规划相比，EventTrigger、Hook 示例及配置启用、非错误 Skip 短路仍未完成；发送阶段明确留在 Stream，不保留空阶段。原计划保留独立 runLoop，不是把每轮工具执行改写为预处理阶段。
 
 ## 3. 斜杠命令系统（对齐 omp 分层）
 
@@ -94,12 +95,13 @@ GoAgent/
 - `~/.claude/skills/<name>/SKILL.md`（user 级，复用现有 skill）
 - `.agents/skills/<name>/SKILL.md`（project 级，可进 git，优先级最高）
 - 同名冲突：project > user，高优先级胜出并告警。
+- 未使用的 `SkillRegistry.Documents()` 访问器及空 `SubProxy` 类型已移除；Skill 发现与 `/skill:` 命令、已注册的 subproxy 工具及其执行循环保留。
 
 ## 5. 核心功能状态表
 
 | 核心组件 | 位置 | 状态 |
 | :--- | :--- | :--- |
-| 消息预处理管线 | internal/pipeline/ | **已实现**（Stream 实际组装 5 个 Stage，命令由单独端点处理） |
+| 消息预处理管线 | internal/pipeline/ | 4 个 Stage；请求级模型快照、Slot 组装与完整预算预检已接通，Hook/Skip 扩展仍未接入 |
 | 斜杠命令系统 | internal/commands/ | **已实现**（builtin/file-based/skill 分层） |
 | skill 来源 | internal/skills/ | **已实现**（~/.claude/skills + .agents/skills 扫描） |
 | **模型管理** | internal/modelmgr/ | **已实现**（model.json 运行时加载 + 每服务 ModelSet + 切换 API） |
@@ -116,12 +118,17 @@ GoAgent/
 - `~/.claude/commands` 的 file-based 命令依赖用户本机目录，CI/无此目录环境静默跳过。
 - EventBus 与 EventTriggerStage 保留为未接入的扩展代码：生产链路没有创建总线、注册 Hook，也未装配事件阶段；`pre_send`、`post_send` 目前仅有事件名声明。它不是 SSE 工具事件通道，未接入的原因不是 Windows 不支持 Go plugin。
 - MCP 工具在启动阶段完成发现并绑定到模型；配置 Reload 只替换配置，不会自动重建现有模型工具集合。
+- SubProxy 当前生产装配仍使用启动时默认模型，不承诺随模型选择器切换；主 Agent 的请求级快照不改变这个独立工具的配置来源。
+- chat 与 aiops 是实际模式；AIOps 提示词的 Plan/Replan 是回答流程指导，不是独立可切换的 plan 模式。连续拒绝只提醒确认权限范围。
+- `read_todo` / `write_todo` 是已注册的 Markdown 文件读写工具，与已删除的旧 TodoStore 无关。仅 chat 模式且两个工具均存在时，连续 5 个非待办工具轮次触发一次提醒；不是任务调度器。
 
 ## 7. 面试讲解主线
 
 ### 7.1 Agent Loop
 
-请求进入 `AgentService.Stream` 后经过 skill、模型准备、上下文预算检查和上下文组装；`runLoop` 反复执行“模型流式输出 → 累积 ToolCall → 权限判定 → 工具执行 → ToolMessage 回填”，模型不再调用工具时结束。实际初始化的是五个处理 Stage，并非文档中七个阶段全部执行；`maxTurns` 的边界实现也不等价于严格 20 轮。普通文本和工具事件通过 SSE 推送，JSONL Store 负责持久化。
+请求经 SkillExpand、ModelPrep、ContextBuild、CompactCheck 后启动独立 runLoop，执行“模型流式输出 → ToolCall → 权限检查 → 工具执行 → ToolMessage 回填”。单次请求固定对话模型、摘要模型和预算；批准与直接允许共用工具执行和错误处理分支。最多执行 20 个工具轮次，随后请求模型在禁用工具的条件下回答；若提供方仍返回 ToolCall，返回错误而不继续执行。首轮和最终回答都走相同的流式事件路径。
+
+HTTP Handler 仍分别消费模型事件和工具事件，但 SSE 的写入和 Flush 共用一把锁，防止首包或事件帧并发写入破坏 HTTP 响应；该锁不改变工具审批或模型循环。
 
 ### 7.2 MCP 接入
 

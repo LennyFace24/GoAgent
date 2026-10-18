@@ -43,7 +43,6 @@ type AgentService struct {
 	tools          []tool.BaseTool
 	compactTrigger *contexttool.CompactTrigger
 	perms          *permission.PermissionManager
-	budget         int64 // 上下文 token 预算（当前激活模型的 ContextBudgetTokens）
 	skillReg       *skills.SkillRegistry
 }
 
@@ -58,7 +57,6 @@ func NewAgentService(toolHandler *tools.ToolHandler, convStore *store.Conversati
 		tools:          tools_,
 		compactTrigger: toolHandler.CompactTrigger,
 		perms:          permission.NewPermissionManager(permission.ModeDefault),
-		budget:         models.Current().ContextBudgetTokens(),
 		skillReg:       skills.NewSkillRegistry(),
 	}
 }
@@ -73,12 +71,12 @@ func (s *AgentService) SwitchModel(ctx context.Context, id string) error {
 	if err := s.models.Switch(ctx, id); err != nil {
 		return err
 	}
-	contexttool.GetContextState().ConfigureMaxTokens(s.budget)
+	contexttool.GetContextState().ConfigureMaxTokens(s.models.Current().ContextBudgetTokens())
 	return nil
 }
 
-// Stream 启动流式 Agent 对话，mode 支持 "chat" 和 "aiops"。
-// 消息经预处理管线（skill 匹配 → 模型准备 → 压缩预检 → 上下文组装）后进入 runLoop。
+// Stream prepares a request-level model snapshot, assembles its context, and
+// compacts the complete message list before starting the tool loop.
 func (s *AgentService) Stream(ctx context.Context,
 	mode string, sessionID string, conversationID string, userMsg string) (*adk.AsyncIterator[*adk.AgentEvent], chan ToolEvent, error) {
 
@@ -88,14 +86,9 @@ func (s *AgentService) Stream(ctx context.Context,
 		history = nil
 	}
 
-	// 每次请求创建独立的 ContextState，避免跨对话污染
-	ctxState := contexttool.NewContextState(s.budget)
-
-	// 同步全局单例（供 /context HTTP 端点展示）
 	globalState := contexttool.GetContextState()
-	globalState.ConfigureMaxTokens(s.budget)
 
-	// 组装预处理管线：skill 触发词匹配 → 模型准备 → 压缩预检 → 上下文组装
+	// Budget checking runs after slot assembly so it includes system and user input.
 	pl := pipeline.New(
 		pipeline.NewSkillExpandStage(func(text string) (*skills.SkillDocument, bool) {
 			doc := s.skillReg.Match(text)
@@ -104,13 +97,12 @@ func (s *AgentService) Stream(ctx context.Context,
 			}
 			return doc, true
 		}),
-		pipeline.NewModelPrepStage(nil, s.buildToolModel),
-		pipeline.NewCompactCheckStage(s.baseModel()),
+		pipeline.NewModelPrepStage(s.models.Snapshot),
 		pipeline.NewContextBuildStage(func(mc *pipeline.MessageContext) *ctxmgr.ContextManager {
 			cm := ctxmgr.New(mc.CtxState.MaxTokens(), s.skillReg)
 			return cm
 		}),
-		pipeline.NewSendStage(),
+		pipeline.NewCompactCheckStage(contexttool.CompactFunc, s.compactTrigger.IsTriggered),
 	)
 
 	mc := &pipeline.MessageContext{
@@ -119,41 +111,17 @@ func (s *AgentService) Stream(ctx context.Context,
 		SessionID:      sessionID,
 		ConversationID: conversationID,
 		History:        history,
-		CtxState:       ctxState,
 	}
 	if err := pl.Run(ctx, mc); err != nil {
 		return nil, nil, err
 	}
 
+	globalState.ConfigureMaxTokens(mc.CtxState.MaxTokens())
+	globalState.SetTokens(mc.CtxState.GetUsage().CurrentTokens)
 	iterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
 	toolEvents := make(chan ToolEvent, 64)
-	go s.runLoop(ctx, mode, mc.Messages, generator, toolEvents, sessionID, conversationID, ctxState, globalState)
+	go s.runLoop(ctx, mc, generator, toolEvents, globalState)
 	return iterator, toolEvents, nil
-}
-
-// baseModel 返回当前激活模型的 ChatModel（惰性构建）
-func (s *AgentService) baseModel() model.BaseChatModel {
-	cm, err := s.models.ChatModel(context.Background())
-	if err != nil {
-		log.Printf("AgentService: ChatModel 构建失败 %v", err)
-		return nil
-	}
-	return cm
-}
-
-// toolModel 返回当前激活模型的带工具模型（惰性构建）
-func (s *AgentService) toolModel() model.ToolCallingChatModel {
-	tm, err := s.models.ToolModel(context.Background())
-	if err != nil {
-		log.Printf("AgentService: ToolModel 构建失败 %v", err)
-		return nil
-	}
-	return tm
-}
-
-// buildToolModel 构建带工具调用的模型（供管线 ModelPrep 阶段使用）
-func (s *AgentService) buildToolModel(ctx context.Context) (model.ToolCallingChatModel, error) {
-	return s.models.ToolModel(ctx)
 }
 
 // collectTurn 读取一轮模型流，推送 thinking_delta/delta 事件到 toolEvents，
@@ -198,39 +166,67 @@ func collectTurn(stream *schema.StreamReader[*schema.Message], toolEvents chan<-
 
 func (s *AgentService) runLoop(
 	ctx context.Context,
-	mode string,
-	messages []*schema.Message,
+	mc *pipeline.MessageContext,
 	gen *adk.AsyncGenerator[*adk.AgentEvent],
 	toolEvents chan ToolEvent,
-	sessionID string,
-	conversationID string,
-	ctxState *contexttool.ContextState,
 	globalState *contexttool.ContextState,
 ) {
 
 	defer close(toolEvents)
 	defer gen.Close()
+	messages := mc.Messages
+	ctxState := mc.CtxState
+	toolModel := mc.ToolModel
 
-	const maxTurns = 20
-	turn := 0
+	const maxToolRounds = 20
 	todoUncalledCount := 0
-
-	for {
-
-		// compact 检查
-		level := contexttool.ShouldCompact(messages, ctxState)
-
-		if s.compactTrigger.IsTriggered() {
-			level = contexttool.CompactFull
+	todoTools := 0
+	if mc.Mode != "aiops" {
+		for _, registered := range s.tools {
+			info, err := registered.Info(ctx)
+			if err != nil {
+				continue
+			}
+			switch info.Name {
+			case "read_todo":
+				todoTools |= 1
+			case "write_todo":
+				todoTools |= 2
+			}
+			if todoTools == 3 {
+				break
+			}
 		}
-		switch level {
-		case contexttool.CompactFull:
-			messages = contexttool.CompactFunc(ctx, messages, s.baseModel(), sessionID, conversationID)
-		case contexttool.CompactMicro:
-			messages = contexttool.MicroCompactFunc(messages)
+	}
+	remindTodo := todoTools == 3
+
+	for turn := range maxToolRounds + 1 {
+		if err := ctx.Err(); err != nil {
+			gen.Send(&adk.AgentEvent{Err: err})
+			return
+		}
+		// Pipeline already checked the initial messages. Recheck only after
+		// tool results have extended them, avoiding an immediate second summary.
+		if turn > 0 {
+			level := contexttool.ShouldCompact(messages, ctxState)
+			if s.compactTrigger.IsTriggered() {
+				level = contexttool.CompactFull
+			}
+			switch level {
+			case contexttool.CompactFull:
+				messages = contexttool.CompactFunc(ctx, messages, mc.ChatModel, mc.SessionID, mc.ConversationID)
+			case contexttool.CompactMicro:
+				messages = contexttool.MicroCompactFunc(messages)
+			}
 		}
 
-		stream, err := s.toolModel().Stream(ctx, messages)
+		var stream *schema.StreamReader[*schema.Message]
+		var err error
+		if turn == maxToolRounds {
+			stream, err = toolModel.Stream(ctx, messages, model.WithToolChoice(schema.ToolChoiceForbidden))
+		} else {
+			stream, err = toolModel.Stream(ctx, messages)
+		}
 		if err != nil {
 			gen.Send(&adk.AgentEvent{Err: err})
 			return
@@ -238,6 +234,7 @@ func (s *AgentService) runLoop(
 
 		// 读取 stream，统一处理 thinking 和 reply 内容
 		toolCalls, thinkingContent, replyContent := collectTurn(stream, toolEvents)
+		stream.Close()
 
 		// 发送 thinking 结束信号
 		if thinkingContent != "" {
@@ -248,7 +245,7 @@ func (s *AgentService) runLoop(
 		replyMsg := schema.AssistantMessage(replyContent, nil)
 		gen.Send(adk.EventFromMessage(replyMsg, nil, schema.Assistant, ""))
 
-		log.Printf("[Turn %d] mode=%s ToolCalls 数量: %d", turn, mode, len(toolCalls))
+		log.Printf("[Turn %d] mode=%s ToolCalls 数量: %d", turn, mc.Mode, len(toolCalls))
 		for i, tc := range toolCalls {
 			log.Printf("[Turn %d] ToolCall[%d]: name=%s args=%s", turn, i, tc.Function.Name, tc.Function.Arguments)
 		}
@@ -257,9 +254,13 @@ func (s *AgentService) runLoop(
 			log.Printf("[Turn %d] 无 ToolCall，返回最终回答", turn)
 			return
 		}
+		if turn == maxToolRounds {
+			gen.Send(&adk.AgentEvent{Err: fmt.Errorf("模型在工具轮数上限后仍返回工具调用")})
+			return
+		}
 
 		// todo 提醒（仅 chat 模式）
-		if mode != "aiops" {
+		if remindTodo {
 			useTodo := false
 			for _, tc := range toolCalls {
 				if tc.Function.Name == "write_todo" || tc.Function.Name == "read_todo" {
@@ -279,10 +280,11 @@ func (s *AgentService) runLoop(
 		fullMsg := &schema.Message{
 			Role:      schema.Assistant,
 			ToolCalls: toolCalls,
+			Content:   replyContent,
 		}
 		messages = append(messages, fullMsg)
 
-		needReminder := mode != "aiops" && todoUncalledCount >= 5
+		needReminder := remindTodo && todoUncalledCount >= 5
 
 		for _, tc := range toolCalls {
 			toolEvents <- ToolEvent{
@@ -300,6 +302,7 @@ func (s *AgentService) runLoop(
 
 			decision := s.perms.Check(tc.Function.Name, toolInput)
 			var result string
+			execute := false
 
 			switch decision.Behavior {
 			case permission.BehaviorDeny:
@@ -307,9 +310,9 @@ func (s *AgentService) runLoop(
 				s.perms.RecordDenial()
 				log.Printf("[Turn %d] 工具 %s 被拒绝: %s", turn, tc.Function.Name, decision.Reason)
 
-			case "ask":
+			case permission.BehaviorAsk:
 				reqID := uuid.New().String()
-				decisionCh := permission.WaitForDecision(reqID, sessionID, conversationID, tc.Function.Name)
+				decisionCh := permission.WaitForDecision(reqID, mc.SessionID, mc.ConversationID, tc.Function.Name)
 				toolEvents <- ToolEvent{
 					Type:      "permission_request",
 					Name:      tc.Function.Name,
@@ -321,14 +324,8 @@ func (s *AgentService) runLoop(
 
 				select {
 				case approved := <-decisionCh:
-					if approved {
-						var toolErr error
-						result, toolErr = s.executeTool(ctx, tc)
-						if toolErr != nil {
-							result = fmt.Sprintf("工具执行失败: %v", toolErr)
-						}
-						s.perms.ResetDenials()
-					} else {
+					execute = approved
+					if !approved {
 						result = "Permission denied by user"
 						s.perms.RecordDenial()
 					}
@@ -340,7 +337,13 @@ func (s *AgentService) runLoop(
 					return
 				}
 
+			case permission.BehaviorAllow:
+				execute = true
 			default:
+				result = "Permission denied: unsupported permission decision"
+			}
+
+			if execute {
 				var toolErr error
 				result, toolErr = s.executeTool(ctx, tc)
 				if toolErr != nil {
@@ -349,8 +352,8 @@ func (s *AgentService) runLoop(
 				s.perms.ResetDenials()
 			}
 
-			if s.perms.ShouldSuggestPlanMode() {
-				result += "\n\n[系统提醒] 工具调用已连续多次被拒绝，建议切换到 plan 模式。"
+			if s.perms.ShouldConfirmPermissions() {
+				result += "\n\n[系统提醒] 工具调用已连续多次被拒绝。请停止重复尝试，向用户确认允许执行的范围，或仅基于已有信息回答。"
 				s.perms.ResetDenials()
 			}
 
@@ -371,20 +374,10 @@ func (s *AgentService) runLoop(
 			messages = append(messages, msg)
 		}
 
-		if turn >= maxTurns {
-			break
-		}
-		turn++
 		// 更新上下文状态（使用本次请求的独立实例）
 		ctxState.EstimateAndEstimateMessages(messages)
 		globalState.SetTokens(ctxState.GetUsage().CurrentTokens)
 	}
-	stream, err := s.toolModel().Stream(ctx, messages)
-	if err != nil {
-		gen.Send(&adk.AgentEvent{Err: err})
-		return
-	}
-	gen.Send(adk.EventFromMessage(nil, stream, schema.Assistant, ""))
 }
 
 func (s *AgentService) executeTool(ctx context.Context, tc schema.ToolCall) (string, error) {

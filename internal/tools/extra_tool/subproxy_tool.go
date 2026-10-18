@@ -14,14 +14,12 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
-type SubProxy struct{}
-
 type SubProxyInput struct {
 	SystemInstruction string `json:"system_instruction" description:"Instructions for the subtask execution context." required:"true"`
 	Content           string `json:"content" description:"The content of the task to be executed." required:"true"`
 }
 
-// runSubAggent 使用当前激活模型运行子代理（跟随主模型切换）
+// runSubAggent 使用调用方提供的模型配置运行独立的子代理循环。
 func runSubAggent(ctx context.Context, content SubProxyInput, model modelmgr.Model) string {
 	chatmodel, err := model.BuildChatModel(ctx)
 	if err != nil {
@@ -105,7 +103,7 @@ func executeTool(ctx context.Context, tc schema.ToolCall, toolMap map[string]too
 }
 
 // NewSubProxyTool 创建 subproxy 工具。
-// getModel 由调用方注入：返回当前激活模型，切换主模型后子代理自动跟随。
+// getModel 在执行时提供模型配置；当前生产装配返回启动时的默认模型。
 func NewSubProxyTool(getModel func() modelmgr.Model) (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"subproxy",

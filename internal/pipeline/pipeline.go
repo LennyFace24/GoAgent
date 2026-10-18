@@ -1,15 +1,8 @@
 // Package pipeline 实现消息预处理管线。
 //
-// 目标流程（对齐规划文档 docs/plan/message-pipeline.md）：
-//
-//	1. CommandCheck    —— 命令命中已在 handler 层完成（/api/commands/execute 短路），
-//	                      本管线接收的是确认非命令的普通消息，故不重复检查。
-//	2. EventTrigger    —— 事件总线：pre_process / pre_send 等 hook 链（插件注入点）
-//	3. SkillExpand     —— 触发词匹配 skill，注入 skill 全文到上下文
-//	4. ModelPrep       —— 模型实例与认证准备
-//	5. CompactCheck    —— 历史预算检查 → MicroCompact / CompactFunc
-//	6. ContextBuild    —— ContextManager 组装 slots + BuildMessages
-//	7. Send            —— 由 AgentService.runLoop 消费 Messages 启动流式
+// 生产流程：SkillExpand → ModelPrep → ContextBuild → CompactCheck。
+// 命令由单独端点处理；EventBus 是尚未装配的扩展点。
+// 管线只负责请求准备；AgentService.Stream 在其成功返回后启动独立 runLoop。
 package pipeline
 
 import (

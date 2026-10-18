@@ -49,7 +49,7 @@ type PermissionManager struct {
 
 func NewPermissionManager(mode Mode) *PermissionManager {
 	return &PermissionManager{
-		mode:                  ModeDefault,
+		mode:                  mode,
 		rules:                 loadPermissionConfig("permission.json"),
 		maxConsecutiveDenials: 3,
 	}
@@ -122,7 +122,6 @@ func (pm *PermissionManager) Check(toolName string, toolInput map[string]any) De
 		return decision
 	}
 	if decision, ok := pm.matchRule(toolName, toolInput, BehaviorAllow); ok {
-		pm.consecutiveDenials = 0
 		return decision
 	}
 
@@ -232,7 +231,7 @@ func (pm *PermissionManager) ConsecutiveDenials() int {
 	return pm.consecutiveDenials
 }
 
-func (pm *PermissionManager) ShouldSuggestPlanMode() bool {
+func (pm *PermissionManager) ShouldConfirmPermissions() bool {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
 	return pm.consecutiveDenials >= pm.maxConsecutiveDenials

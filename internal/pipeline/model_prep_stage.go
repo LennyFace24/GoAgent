@@ -2,68 +2,34 @@ package pipeline
 
 import (
 	"context"
-	"log"
-
-	"github.com/cloudwego/eino/components/model"
 
 	"github.com/LennyFace24/MiniAgent/internal/modelmgr"
+	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 )
 
-// ---------- Stage 4: ModelPrep ----------
-// 模型实例与认证准备。构建函数由外部注入（AgentService 提供 ModelSet 惰性构建）。
-
-// ModelPrepStage 准备模型实例
+// ModelPrepStage selects the models and token budget together for one request.
 type ModelPrepStage struct {
-	// BuildModel 由外部注入，返回 ChatModel
-	BuildModel func(ctx context.Context) (model.BaseChatModel, error)
-	// BuildToolModel 由外部注入，返回带工具的模型
-	BuildToolModel func(ctx context.Context) (model.ToolCallingChatModel, error)
-	// GetModel 返回当前激活模型配置（用于独立使用管线时的默认构建）
-	GetModel func() modelmgr.Model
+	Prepare func(context.Context) (modelmgr.ModelSnapshot, error)
 }
 
-// NewModelPrepStage 创建模型准备阶段
-func NewModelPrepStage(build func(ctx context.Context) (model.BaseChatModel, error), buildTool func(ctx context.Context) (model.ToolCallingChatModel, error)) *ModelPrepStage {
-	return &ModelPrepStage{BuildModel: build, BuildToolModel: buildTool}
-}
-
-// WithGetModel 设置模型提供器（独立使用管线时用于默认构建）
-func (s *ModelPrepStage) WithGetModel(get func() modelmgr.Model) *ModelPrepStage {
-	s.GetModel = get
-	return s
+func NewModelPrepStage(prepare func(context.Context) (modelmgr.ModelSnapshot, error)) *ModelPrepStage {
+	return &ModelPrepStage{Prepare: prepare}
 }
 
 func (s *ModelPrepStage) Name() string { return "model_prep" }
 
 func (s *ModelPrepStage) Process(ctx context.Context, mc *MessageContext) error {
-	if s.BuildToolModel != nil {
-		tm, err := s.BuildToolModel(ctx)
-		if err != nil {
-			return err
-		}
-		mc.ToolModel = tm
-		return nil
+	snapshot, err := s.Prepare(ctx)
+	if err != nil {
+		return err
 	}
-	if s.BuildModel != nil {
-		cm, err := s.BuildModel(ctx)
-		if err != nil {
-			return err
-		}
-		mc.ChatModel = cm
-		return nil
+	mc.ChatModel = snapshot.ChatModel
+	mc.ToolModel = snapshot.ToolModel
+	budget := snapshot.Config.ContextBudgetTokens()
+	if mc.CtxState == nil {
+		mc.CtxState = contexttool.NewContextState(budget)
+	} else {
+		mc.CtxState.ConfigureMaxTokens(budget)
 	}
-
-	// 默认实现：从模型提供器构建（独立使用管线）
-	if s.GetModel != nil {
-		m := s.GetModel()
-		cm, err := m.BuildChatModel(ctx)
-		if err != nil {
-			return err
-		}
-		mc.ChatModel = cm
-		return nil
-	}
-
-	log.Printf("pipeline: 未配置模型构建器，跳过模型准备")
 	return nil
 }

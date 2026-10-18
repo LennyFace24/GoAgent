@@ -10,41 +10,35 @@ import (
 	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 )
 
-// ---------- Stage 5: CompactCheck ----------
-// 发送前预检历史预算，超阈值执行 MicroCompact / CompactFunc。
-// （runLoop 内另有每轮兜底检查，两者并存；预检保证首次发送前不超载）
-
-// CompactCheckStage 历史预算压缩
+// CompactCheckStage checks the assembled request, including system slots and
+// the current user message. runLoop rechecks after tools add more messages.
 type CompactCheckStage struct {
-	ChatModel model.BaseChatModel
-	// CompactFull 完整压缩函数（AgentService 提供，含 LLM 摘要）
-	CompactFull func(ctx context.Context, messages []*schema.Message, m model.BaseChatModel, sessionID, conversationID string) []*schema.Message
+	CompactFull func(context.Context, []*schema.Message, model.BaseChatModel, string, string) []*schema.Message
+	ShouldForce func() bool
 }
 
-// NewCompactCheckStage 创建压缩预检阶段
-func NewCompactCheckStage(m model.BaseChatModel) *CompactCheckStage {
-	return &CompactCheckStage{ChatModel: m}
+func NewCompactCheckStage(compact func(context.Context, []*schema.Message, model.BaseChatModel, string, string) []*schema.Message, shouldForce func() bool) *CompactCheckStage {
+	return &CompactCheckStage{CompactFull: compact, ShouldForce: shouldForce}
 }
 
 func (s *CompactCheckStage) Name() string { return "compact_check" }
 
 func (s *CompactCheckStage) Process(ctx context.Context, mc *MessageContext) error {
-	if len(mc.History) == 0 {
-		return nil
+	if err := ctx.Err(); err != nil {
+		return err
 	}
-	if mc.CtxState == nil {
-		mc.CtxState = contexttool.NewContextState(200000)
+	level := contexttool.ShouldCompact(mc.Messages, mc.CtxState)
+	if s.ShouldForce != nil && s.ShouldForce() {
+		level = contexttool.CompactFull
 	}
-	level := contexttool.ShouldCompact(mc.History, mc.CtxState)
 	switch level {
 	case contexttool.CompactFull:
 		log.Printf("pipeline: 发送前触发完整压缩")
-		if s.CompactFull != nil {
-			mc.History = s.CompactFull(ctx, mc.History, s.ChatModel, mc.SessionID, mc.ConversationID)
-		}
+		mc.Messages = s.CompactFull(ctx, mc.Messages, mc.ChatModel, mc.SessionID, mc.ConversationID)
 	case contexttool.CompactMicro:
 		log.Printf("pipeline: 发送前触发微压缩")
-		mc.History = contexttool.MicroCompactFunc(mc.History)
+		mc.Messages = contexttool.MicroCompactFunc(mc.Messages)
 	}
-	return nil
+	mc.CtxState.EstimateAndEstimateMessages(mc.Messages)
+	return ctx.Err()
 }

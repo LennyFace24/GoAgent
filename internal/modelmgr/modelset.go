@@ -7,6 +7,7 @@ import (
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
+	"github.com/cloudwego/eino/schema"
 )
 
 // ModelSet 一个服务实例的模型状态：当前激活模型 + 惰性构建的模型实例。
@@ -15,14 +16,13 @@ import (
 //   - Registry 可共享：只读的 model.json 注册表，多服务可共用
 //   - ModelSet 每服务独立：持有 currentID + 构建出的 ChatModel/ToolModel，
 //     每个服务使用自己的 ModelSet，互不干扰
-//   - Switch 重建：切换模型时重建 ChatModel/ToolModel（重绑工具），
-//     在途请求持读锁继续用旧模型，写锁切换
+//   - Snapshot 同时选定对话模型、摘要模型和预算；Switch 只影响之后的快照。
 type ModelSet struct {
 	registry  *Registry
 	tools     []tool.BaseTool
 	mu        sync.RWMutex
 	currentID string
-	chatModel model.BaseChatModel
+	chatModel model.ToolCallingChatModel
 	toolModel model.ToolCallingChatModel
 }
 
@@ -54,42 +54,49 @@ func (ms *ModelSet) ListModels() []Model {
 	return ms.registry.List()
 }
 
-// ChatModel 返回惰性构建的 ChatModel（无工具绑定）
-func (ms *ModelSet) ChatModel(ctx context.Context) (model.BaseChatModel, error) {
-	ms.mu.RLock()
-	defer ms.mu.RUnlock()
-	if ms.chatModel != nil {
-		return ms.chatModel, nil
-	}
-	m, ok := ms.registry.Get(ms.currentID)
-	if !ok {
-		return nil, fmt.Errorf("模型 %q 不存在", ms.currentID)
-	}
-	cm, err := m.BuildChatModel(ctx)
-	if err != nil {
-		return nil, err
-	}
-	ms.chatModel = cm
-	return cm, nil
+// ModelSnapshot fixes the execution models and their configuration for one request.
+type ModelSnapshot struct {
+	Config    Model
+	ChatModel model.BaseChatModel
+	ToolModel model.ToolCallingChatModel
 }
 
-// ToolModel 返回惰性构建的带工具模型
-func (ms *ModelSet) ToolModel(ctx context.Context) (model.ToolCallingChatModel, error) {
-	ms.mu.RLock()
-	defer ms.mu.RUnlock()
-	if ms.toolModel != nil {
-		return ms.toolModel, nil
-	}
+// Snapshot prepares both models under the selection lock, so a concurrent
+// Switch cannot mix a new budget or summary model into an in-flight request.
+func (ms *ModelSet) Snapshot(ctx context.Context) (ModelSnapshot, error) {
+	ms.mu.Lock()
+	defer ms.mu.Unlock()
 	m, ok := ms.registry.Get(ms.currentID)
 	if !ok {
-		return nil, fmt.Errorf("模型 %q 不存在", ms.currentID)
+		return ModelSnapshot{}, fmt.Errorf("模型 %q 不存在", ms.currentID)
 	}
-	tm, err := m.BuildToolCallingModel(ctx, ms.tools)
-	if err != nil {
-		return nil, err
+	if ms.chatModel == nil {
+		cm, err := m.BuildChatModel(ctx)
+		if err != nil {
+			return ModelSnapshot{}, err
+		}
+		ms.chatModel = cm
 	}
-	ms.toolModel = tm
-	return tm, nil
+	if ms.toolModel == nil {
+		infos := make([]*schema.ToolInfo, 0, len(ms.tools))
+		for _, registered := range ms.tools {
+			info, err := registered.Info(ctx)
+			if err != nil {
+				return ModelSnapshot{}, fmt.Errorf("获取工具信息失败: %w", err)
+			}
+			infos = append(infos, info)
+		}
+		ms.toolModel = ms.chatModel
+		if len(infos) > 0 {
+			bound, err := ms.chatModel.WithTools(infos)
+			if err != nil {
+				ms.toolModel = nil
+				return ModelSnapshot{}, err
+			}
+			ms.toolModel = bound
+		}
+	}
+	return ModelSnapshot{Config: m, ChatModel: ms.chatModel, ToolModel: ms.toolModel}, nil
 }
 
 // Switch 切换模型。id 不存在返回错误；成功时重建 ChatModel/ToolModel。

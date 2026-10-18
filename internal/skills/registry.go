@@ -141,11 +141,6 @@ func (r *SkillRegistry) LoadFullText(name string) string {
 	return fmt.Sprintf("<skill name=\"%s\">\n%s\n</skill>", doc.Manifest.Name, doc.Body)
 }
 
-// Documents 返回所有已加载的 skill 文档。
-func (r *SkillRegistry) Documents() map[string]SkillDocument {
-	return r.documents
-}
-
 // ListCommandCandidates 返回可注册为命令的 skill（有 description 的）。
 // 供 commands 包注册 /skill:<name> 命令。
 func (r *SkillRegistry) ListCommandCandidates() []SkillDocument {

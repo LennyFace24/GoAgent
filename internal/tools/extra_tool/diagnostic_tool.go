@@ -10,15 +10,11 @@ import (
 	"github.com/cloudwego/eino/components/tool/utils"
 )
 
-type HealthCheckInput struct {
-	Service string `json:"service" description:"要检查的服务名称，可选" required:"false"`
-}
-
 func NewHealthCheckTool(collector metrics.Collector) (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"health_check",
-		"检查系统健康状态，返回 CPU、内存、磁盘、负载等实时指标。可选 service 参数用于过滤特定 job。",
-		func(ctx context.Context, input HealthCheckInput) (string, error) {
+		"查询 GoAgent 后端运行环境的 CPU、内存、磁盘和系统负载指标，无需参数。",
+		func(_ context.Context, _ struct{}) (string, error) {
 			return queryMetrics(collector)
 		},
 	)

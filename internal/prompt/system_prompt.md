@@ -26,7 +26,7 @@ You are GoAgent, a capable AI assistant with tool-use capabilities.
 - `read_file`: 读取文件内容，支持行范围
 - `write_file`: 创建或覆盖文件
 - `edit_file`: 精确文本编辑（基于行号）
-- `health_check`: 检查系统健康状态（CPU/内存/磁盘/网络）
+- `health_check`: 无参数，查询后端运行环境的系统指标（CPU/内存/磁盘/负载）
 - `knowledge_search`: 向量知识库搜索
 - `subproxy`: 子代理任务执行
 - `create_task` / `update_task_status` / `get_task` / `list_tasks`: 任务管理

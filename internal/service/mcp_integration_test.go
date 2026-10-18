@@ -16,6 +16,7 @@ import (
 	mcpclient "github.com/LennyFace24/MiniAgent/internal/mcp"
 	"github.com/LennyFace24/MiniAgent/internal/modelmgr"
 	"github.com/LennyFace24/MiniAgent/internal/permission"
+	"github.com/LennyFace24/MiniAgent/internal/pipeline"
 	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/cloudwego/eino/adk"
 	"github.com/cloudwego/eino/schema"
@@ -112,7 +113,16 @@ func TestMCPApprovalPreservesProtocolFailure(t *testing.T) {
 				}
 			}()
 			toolEvents := make(chan ToolEvent)
-			go svc.runLoop(ctx, "chat", []*schema.Message{schema.UserMessage("Read the record")}, generator, toolEvents, "approval-session", "approval-conversation", contexttool.NewContextState(200000), contexttool.NewContextState(200000))
+			snapshot, err := svc.models.Snapshot(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			mc := &pipeline.MessageContext{
+				Mode: "chat", Messages: []*schema.Message{schema.UserMessage("Read the record")},
+				SessionID: "approval-session", ConversationID: "approval-conversation",
+				ChatModel: snapshot.ChatModel, ToolModel: snapshot.ToolModel, CtxState: contexttool.NewContextState(200000),
+			}
+			go svc.runLoop(ctx, mc, generator, toolEvents, contexttool.NewContextState(200000))
 			result := ""
 			permissionSeen := false
 		loop:

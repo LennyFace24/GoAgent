@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"log"
 	"net"
 	"net/http"
@@ -69,6 +70,12 @@ func run(ctx context.Context) error {
 		}
 	}()
 	handler.SetupRoutes(r)
+	if err := handler.SetupFrontend(r, "frontend/dist"); err != nil {
+		if !errors.Is(err, fs.ErrNotExist) {
+			return fmt.Errorf("初始化前端托管失败: %w", err)
+		}
+		log.Printf("前端未托管，仅启动 API；需要页面时先执行 npm --prefix frontend run build: %v", err)
+	}
 
 	listener, err := net.Listen("tcp", net.JoinHostPort(cfg.Server.Host, cfg.Server.Port))
 	if err != nil {

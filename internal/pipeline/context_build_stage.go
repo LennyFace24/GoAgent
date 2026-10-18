@@ -42,13 +42,11 @@ func (s *ContextBuildStage) Process(ctx context.Context, mc *MessageContext) err
 
 	// skill 注入：放进 skills slot（与 LoadSkills 索引并列）
 	if mc.Skill != nil {
-		skillContent := cm.Build() // 触发排序前的当前内容
-		_ = skillContent
 		// 通过注入 slot 追加 skill 全文
 		cm.AppendSlot("skill_active", strings.TrimSpace(mc.Skill.Body), 4)
 	}
 
-	// 历史预算压缩在 CompactCheck 阶段已完成，这里直接组装
+	// Assemble slots before CompactCheck so system and current input count toward the budget.
 	mc.Messages = cm.BuildMessages(mc.History, mc.Raw)
 	log.Printf("pipeline: 组装完成，共 %d 条消息", len(mc.Messages))
 	return nil

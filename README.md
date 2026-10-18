@@ -7,12 +7,13 @@
 ## 功能概览
 
 - **流式智能对话**：通过 ReAct Agent 调用已注册工具，并以流式方式返回执行过程和回答。
-- **AIOps 诊断**：提供面向运维问题的 Agent 入口，可结合指标查询工具进行分析。
+- **AIOps 诊断**：提供面向运维问题的 Agent 入口；`health_check` 无需参数，查询后端运行环境的 CPU、内存、磁盘和负载，不提供按业务服务过滤或可用性探测。
 - **工具调用**：支持 Bash 执行、文件读写、知识库检索、指标查询以及子 Agent 代理等工具。
 - **安全控制**：对 Bash 命令进行敏感操作拦截，并通过工作区限制文件访问范围。
 - **知识库检索**：结合 Embedding 模型与 Chroma/Milvus Lite 服务实现文档向量检索。
 - **会话管理**：支持创建、查询、删除对话，并将会话数据持久化到本地 `data/conversations` 目录。
 - **权限响应**：当工具执行需要用户确认时，可通过权限接口返回确认结果。
+- **请求级执行一致性**：一次请求固定使用准备好的对话模型、摘要模型和 Token 预算；切换模型影响后续请求。Slot 与历史组装后统一预检压缩，工具循环最多执行 20 个工具轮次，再禁用工具请求最终回答。
 - **上下文监控**：提供当前上下文使用量查询，避免超过模型上下文窗口。
 - **前后端分离**：后端提供 HTTP API，前端通过 Nginx 提供 Web 界面。
 
@@ -64,21 +65,19 @@ git clone https://github.com/LennyFace24/GoAgent.git
 cd GoAgent
 ```
 
-2. 编辑 Docker 配置：
+2. 配置服务参数与对话模型：
+
+编辑 `config.docker.yaml` 中的 Embedding 地址、Key、模型名以及 `session.secret_key`；对话模型不再从 YAML 的 `llm` 段读取。
+
+若项目根目录还没有 `model.json`，从模板复制后填写实际模型信息：
 
 ```bash
-cp config.docker.yaml config.local.yaml
+cp model.example.json model.json
 ```
 
-然后将实际使用的配置写入 `config.docker.yaml`，至少需要设置：
+在 `model.json` 中配置 `default` 和 `models`，每个模型的 `id` 应是提供方接受的模型名称，另填写 `base_url`、`api_key` 等参数。已有本地 `model.json` 可直接复用，不必覆盖。
 
-- `llm.base_url`
-- `llm.api_key`
-- `llm.model`
-- `embedding.base_url`
-- `embedding.api_key`
-- `embedding.model`
-- `session.secret_key`
+Compose 将 `model.json` 只读挂载到后端 `/app/model.json`；文件必须提前存在，不会自动创建。修改文件后需重启后端生效，不需要重新构建前端或镜像。容器中的 `localhost` 指容器本身，模型端点必须是容器可访问的地址。
 
 3. 启动所有服务：
 
@@ -112,11 +111,12 @@ docker compose down
 docker compose down -v
 ```
 
-### 方式二：本地运行后端
+### 方式二：本地统一启动（Go 托管前端）
 
 环境要求：
 
 - Go 1.25 或更高版本
+- Node.js 20 或更高版本及 npm（仅安装依赖、构建前端或使用 Vite 开发时需要）
 - 一个兼容 OpenAI API 的 LLM 服务
 - 一个兼容 OpenAI API 的 Embedding 服务
 - 可选：本地运行 Chroma/Milvus Lite 服务
@@ -127,14 +127,38 @@ docker compose down -v
 cp config.example.yaml config.yaml
 ```
 
-安装依赖并启动：
+另需在项目根目录准备 `model.json`：若尚不存在，可复制 `model.example.json` 并填写模型的 `id`、`base_url`、`api_key` 等参数；已有配置不要覆盖。模型配置由 `internal/modelmgr` 加载。
+
+首次安装依赖并构建前端，然后启动 Go：
 
 ```bash
+npm --prefix frontend ci
+npm --prefix frontend run build
 go mod download
-go run ./cmd/main.go
+go run ./cmd
 ```
 
-默认监听地址为 `127.0.0.1:8080`。配置文件中的 `server.host` 和 `server.port` 可以修改监听地址。
+打开 `http://127.0.0.1:8080`。Go 在同一端口提供页面和 `/api/*` 接口，不需要再运行 Vite。默认监听地址由 `config.yaml` 中的 `server.host` 和 `server.port` 决定。
+
+注意：
+
+- 所有命令均从项目根目录执行；配置、Prompt 和 `frontend/dist` 目前仍按工作目录定位。
+- `go run ./cmd` 不会自动运行 npm。修改 Vue 源码后，需重新执行前端构建；修改 Go 代码后需重启 Go。
+- 首页、`/index.html` 和 `/assets/*` 只读取构建目录中的文件；不存在的 API、资源或页面返回 404，不回退到首页，也不公开项目源码与配置文件。
+- 未找到前端首页时，Go 会打印提示并仅启动 API，保留纯后端及 Vite 开发方式；其他构建目录错误会使启动失败。
+- 模型服务、Embedding、Chroma 和远程沙箱等依赖仍需按所用功能配置；统一入口不等于全部依赖离线或自动启动。
+
+需要前端热更新时，仍可使用两个终端：
+
+```bash
+# 终端一：Go API
+go run ./cmd
+
+# 终端二：Vite 前端
+npm --prefix frontend run dev
+```
+
+Vite 开发界面默认是 `http://localhost:3000`，通过原有代理访问本机 `8080` 端口。已有 Docker/Nginx 部署保持不变；本次统一入口没有将前端产物加入 Go Docker 镜像。
 
 如果需要单独启动向量服务：
 
@@ -155,14 +179,6 @@ server:
   host: 127.0.0.1
   port: 8080
 
-llm:
-  base_url: https://your-api.com/v1/
-  api_key: your-api-key
-  model: your-model
-  context_window: 200000
-  max_completion_tokens: 8192
-  safety_margin_tokens: 4096
-
 embedding:
   base_url: https://your-embedding.com/v1
   api_key: your-api-key
@@ -178,12 +194,14 @@ sandbox:
   endpoint: http://localhost:8081
 ```
 
+对话模型使用独立的 `model.json`（参见 `model.example.json`），不使用 YAML 的 `llm` 段。`default` 指向 `models` 中一个条目的 `id`；`context_window`、`max_completion_tokens` 和 `safety_margin_tokens` 也放在对应模型条目中。`embedding` 则仍保留在应用 YAML 中，供知识库向量化使用。
+
 注意事项：
 
 - 不要将真实 API Key、Session Secret 或其他敏感信息提交到 Git 仓库。
 - `session.secret_key` 不能为空，建议使用足够长度的随机字符串。
 - `workspace.root` 用于限制文件工具可访问的工作区范围。
-- 使用 Docker Compose 时，后端容器通过 `config.docker.yaml` 加载配置，向量数据和会话数据分别保存在 Docker volume 中。
+- 使用 Docker Compose 时，`config.docker.yaml` 挂载为 `/app/config.yaml`，独立的 `model.json` 只读挂载为 `/app/model.json`；向量数据和会话数据分别保存在 Docker volume 中。
 
 ## API 接口
 
@@ -267,6 +285,7 @@ MCP 接入支持：
 
 - 任务依赖调度系统目前仍是骨架，尚未形成完整的任务编排能力。
 - 多 Agent 团队协作尚未实现完整的 Planner/Executor 协同流程。
+- 没有独立可切换的 plan 模式；AIOps 中的“计划/执行/重规划”属于提示词流程。连续权限拒绝只提示确认执行范围，不会切换运行模式。
 - WebSocket MCP 传输暂未由当前 Go MCP SDK 支持。
 - 长期记忆、MCP Server 配置管理 API 以及运行时无损热替换尚未完成。
 - 当前 SDK 会将 `structuredContent` 中的 JSON 数字解码为 `float64`；超过安全整数范围的标识符应由 MCP Server 返回字符串。工具调用入参使用 `json.Number` 保留精度。
@@ -308,11 +327,15 @@ gofmt -w cmd internal
 go test ./...
 ```
 
-构建后端：
+构建演示用程序（Windows，从项目根目录执行）：
 
-```bash
-go build -o goagent ./cmd/main.go
+```powershell
+npm --prefix frontend run build
+go build -o bin/goagent.exe ./cmd
+.\bin\goagent.exe
 ```
+
+前两条命令负责构建，最后一条才是启动；后续演示可直接执行最后一条。运行时保留 `frontend/dist`、配置和 Prompt 文件，当前不是嵌入前端的单文件发行包。Linux/macOS 可构建为 `go build -o bin/goagent ./cmd` 并执行 `./bin/goagent`。
 
 构建 Docker 镜像：
 
