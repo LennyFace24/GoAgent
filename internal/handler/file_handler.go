@@ -29,19 +29,19 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 	}
 	defer file.Close()
 	// 处理headername
-// 【正确修复】1. 先将所有反斜杠统一替换为正斜杠，确保 Windows 路径格式被标准化
-    standardizedPath := strings.ReplaceAll(header.Filename, "\\", "/")
-    
-    // 【正确修复】2. 使用 path 包（而非 filepath 包）提取纯文件名
-    filename := path.Base(standardizedPath)
+	// 先将所有反斜杠统一替换为正斜杠，确保 Windows 路径格式被标准化
+	standardizedPath := strings.ReplaceAll(header.Filename, "\\", "/")
 
-    // 【正确修复】3. 防御性检查：过滤非法的文件名结果
-    if filename == "." || filename == "/" || filename == "" {
-        c.JSON(400, gin.H{
-            "error": "Invalid file name",
-        })
-        return
-    }
+	// 使用 path 包（而非 filepath 包）提取纯文件名
+	filename := path.Base(standardizedPath)
+
+	// 防御性检查：过滤非法的文件名结果
+	if filename == "." || filename == "/" || filename == "" {
+		c.JSON(400, gin.H{
+			"error": "Invalid file name",
+		})
+		return
+	}
 
 	// 处理文件
 	if err := h.fileService.ProcessFile(c.Request.Context(), file, filename); err != nil {
@@ -50,7 +50,7 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 		})
 		return
 	}
-	
+
 	c.JSON(200, gin.H{
 		"status":  "ok",
 		"message": "File uploaded and processed successfully",

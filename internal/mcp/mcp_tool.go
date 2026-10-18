@@ -18,16 +18,14 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// exportedNameMaxLen bounds the tool name handed to the model. Model providers
-// reject long or exotic names, so anything that does not fit is truncated and
-// disambiguated with a deterministic hash of the (server, tool) tuple.
+// exportedNameMaxLen 限制交给模型的工具名长度。模型提供方会拒绝过长或含特殊字符的名字，
+// 因此放不下的名字会被截断，并用 (server, tool) 元组的确定性哈希消除歧义。
 const exportedNameMaxLen = 64
 
-// mcpTool adapts one remote MCP tool to Eino's invokable tool interface.
+// mcpTool 把一个远端 MCP 工具适配成 Eino 的可调用工具接口。
 //
-// The exported name is namespaced so tools from different MCP servers cannot
-// collide in the model's tool list. The original server and tool name are
-// captured on the adapter, so a call never parses the exported name back apart.
+// 导出名做了命名空间隔离，避免不同 MCP 服务器的工具在模型工具列表里冲突。
+// 原始 server/tool 名保存在适配器上，调用时不需要从导出名反解析。
 type mcpTool struct {
 	manager    *MCPManager
 	serverName string
@@ -58,22 +56,17 @@ func newMCPTool(manager *MCPManager, serverName string, remote *sdkmcp.Tool) (*m
 		serverName: serverName,
 		remoteName: remote.Name,
 		info: &schema.ToolInfo{
-			Name: name,
-			Desc: description,
-			Extra: map[string]any{
-				"mcp_server": serverName,
-				"mcp_tool":   remote.Name,
-			},
+			Name:        name,
+			Desc:        description,
 			ParamsOneOf: schema.NewParamsOneOfByJSONSchema(inputSchema),
 		},
 	}, nil
 }
 
-// convertInputSchema turns a remote JSON Schema into Eino's representation.
+// convertInputSchema 把远端 JSON Schema 转成 Eino 的表示。
 //
-// A missing or malformed schema is an error instead of an empty object schema:
-// silently accepting one would tell the model that every argument is valid and
-// hide the server's mistake until runtime.
+// schema 缺失或格式错误会返回错误，而不是退化成空 object schema：
+// 静默接受会让模型以为任意参数都合法，并把服务器的错误推迟到运行时才暴露。
 func convertInputSchema(serverName, toolName string, remote any) (*einojsonschema.Schema, error) {
 	if remote == nil {
 		return nil, fmt.Errorf("MCP tool %s/%s has no input schema", serverName, toolName)
@@ -108,12 +101,10 @@ func (t *mcpTool) Info(context.Context) (*schema.ToolInfo, error) {
 	return t.info, nil
 }
 
-// InvokableRun forwards JSON arguments to the selected MCP session and renders
-// the MCP result as the string Eino's tool loop expects.
+// InvokableRun 把 JSON 参数转发给选定的 MCP 会话，并把结果渲染成 Eino 工具循环需要的字符串。
 //
-// A tool-level failure (CallToolResult.IsError) is data, not a Go error: the
-// model has to see it to self-correct, including on the ask-approval path. Only
-// protocol or marshaling failures become Go errors.
+// 工具级失败（CallToolResult.IsError）是数据而不是 Go 错误：模型需要看到它才能自我纠正，
+// 包括在权限确认路径上。只有协议或序列化失败才返回 Go 错误。
 func (t *mcpTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ...tool.Option) (string, error) {
 	args, err := decodeArguments(argumentsInJSON)
 	if err != nil {
@@ -127,11 +118,10 @@ func (t *mcpTool) InvokableRun(ctx context.Context, argumentsInJSON string, _ ..
 	return renderCallToolResult(t.serverName, t.remoteName, result)
 }
 
-// decodeArguments parses the model's JSON arguments into MCP arguments.
+// decodeArguments 把模型的 JSON 参数解析成 MCP 参数。
 //
-// The decoder uses UseNumber so large integers survive the map[string]any round
-// trip instead of being widened to float64 and losing precision. Non-object and
-// trailing JSON are rejected rather than partially applied.
+// 使用 UseNumber 让大整数在 map[string]any 往返中保持精度，而不是被扩宽为 float64。
+// 非对象和尾部多余 JSON 会被拒绝，而不是部分应用。
 func decodeArguments(argumentsInJSON string) (map[string]any, error) {
 	trimmed := strings.TrimSpace(argumentsInJSON)
 	if trimmed == "" {
@@ -154,12 +144,10 @@ func decodeArguments(argumentsInJSON string) (map[string]any, error) {
 	return args, nil
 }
 
-// renderCallToolResult renders an MCP result for the model.
+// renderCallToolResult 把 MCP 结果渲染给模型。
 //
-// Successful text-only results stay plain joined text. Anything richer
-// (structured content, non-text content) and any tool-level error is rendered
-// as the full JSON of the result, so isError, content and structuredContent all
-// reach the model instead of being flattened away.
+// 成功的纯文本结果保持简单拼接；更丰富的内容（结构化内容、非文本内容）以及工具级错误
+// 都按完整 JSON 渲染，使 isError、content、structuredContent 都能到达模型，而不是被扁平化。
 func renderCallToolResult(serverName, toolName string, result *sdkmcp.CallToolResult) (string, error) {
 	if result == nil {
 		return "", fmt.Errorf("MCP tool %s/%s returned no result", serverName, toolName)
@@ -191,12 +179,11 @@ func allTextContent(contents []sdkmcp.Content) bool {
 	return true
 }
 
-// exportedToolName builds the model-visible name for a remote MCP tool.
+// exportedToolName 生成远端 MCP 工具对模型可见的名字。
 //
-// Simple names keep the readable "mcp__server__tool" form. Names that need
-// sanitizing, that exceed exportedNameMaxLen, or whose server/tool boundary is
-// ambiguous (they already contain the "__" separator) get a deterministic tuple
-// hash instead. The manager rejects any remaining exported-name collision.
+// 简单名字保留可读的 "mcp__server__tool" 形式。需要清洗、超过 exportedNameMaxLen，
+// 或 server/tool 边界有歧义（本身已包含 "__" 分隔符）的名字，改用确定性元组哈希。
+// 管理器会拒绝任何仍然存在的导出名冲突。
 func exportedToolName(serverName, toolName string) string {
 	server := sanitizeNamePart(serverName)
 	tool := sanitizeNamePart(toolName)
@@ -210,9 +197,8 @@ func exportedToolName(serverName, toolName string) string {
 	return hashedToolName(serverName, toolName)
 }
 
-// hashedToolName builds a bounded, unambiguous name. The hash input is the
-// length-prefixed (server, tool) tuple, so no concatenation of two different
-// tuples can produce the same digest.
+// hashedToolName 生成有长度上限且无歧义的名字。哈希输入是带长度前缀的 (server, tool)
+// 元组，因此不同元组拼接后不可能产生相同的摘要。
 func hashedToolName(serverName, toolName string) string {
 	digest := sha256.Sum256([]byte(
 		strconv.Itoa(len(serverName)) + ":" + serverName + "|" +
@@ -233,8 +219,8 @@ func hashedToolName(serverName, toolName string) string {
 	return prefix + server + "_" + remote + "_" + suffix
 }
 
-// sanitizeNamePart keeps only the characters allowed in model tool names:
-// [A-Za-z0-9_-]. Every other rune collapses to '_'.
+// sanitizeNamePart 只保留模型工具名允许的字符：[A-Za-z0-9_-]，
+// 其他字符统一替换为 '_'。
 func sanitizeNamePart(value string) string {
 	var b strings.Builder
 	b.Grow(len(value))

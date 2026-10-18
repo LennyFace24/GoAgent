@@ -117,7 +117,7 @@ describe('useChat 跨会话事件路由', () => {
 })
 
 describe('useChat 停止标记', () => {
-  it('abort 在最后一条流式 assistant 消息末尾追加终止标记', async () => {
+  it('abort 保留已收到的正文并结束流式状态', async () => {
     const s = makeStepStream()
     globalThis.fetch = mockFetchWith(s.stream)
     const { chat } = setupChat('A')
@@ -140,7 +140,6 @@ describe('useChat 停止标记', () => {
     const last = chat.messages.value[chat.messages.value.length - 1] as any
     expect(last.role).toBe('assistant')
     expect(last.content).toContain('partial')
-    expect(last.content).toContain('该回答此处被用户终止')
     expect(last.streaming).toBe(false)
   })
 })

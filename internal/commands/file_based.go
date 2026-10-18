@@ -101,27 +101,34 @@ func registerFileCommand(r *Registry, name, path, source string) {
 // RenderTemplate 渲染命令模板：
 // - $1..$9 位置参数
 // - $ARGUMENTS / $@ 聚合参数
-// - 模板未使用任何占位符时，将参数追加到渲染文本末尾（omp inline-argument fallback）
+// - 未被位置参数消费的尾部参数追加到渲染文本末尾
 func RenderTemplate(body string, args []string) string {
 	all := strings.Join(args, " ")
-
-	used := strings.Contains(body, "$ARGUMENTS") || strings.Contains(body, "$@")
+	aggregateUsed := strings.Contains(body, "$ARGUMENTS") || strings.Contains(body, "$@")
 	rendered := strings.ReplaceAll(body, "$ARGUMENTS", all)
 	rendered = strings.ReplaceAll(rendered, "$@", all)
+
+	maxPos := 0
 	for i := 1; i <= 9; i++ {
 		ph := "$" + string(rune('0'+i))
-		if strings.Contains(rendered, ph) {
-			used = true
-			val := ""
-			if i <= len(args) {
-				val = args[i-1]
-			}
-			rendered = strings.ReplaceAll(rendered, ph, val)
+		if !strings.Contains(rendered, ph) {
+			continue
 		}
+		if i > maxPos {
+			maxPos = i
+		}
+		val := ""
+		if i <= len(args) {
+			val = args[i-1]
+		}
+		rendered = strings.ReplaceAll(rendered, ph, val)
 	}
 
-	if !used && len(args) > 0 {
-		rendered = strings.TrimSpace(rendered) + "\n\n" + all
+	if !aggregateUsed && len(args) > maxPos {
+		remaining := strings.TrimSpace(strings.Join(args[maxPos:], " "))
+		if remaining != "" {
+			rendered = strings.TrimSpace(rendered) + "\n\n" + remaining
+		}
 	}
 	return rendered
 }

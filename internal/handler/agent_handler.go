@@ -88,6 +88,7 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 			case "thinking_done":
 				writeSSE("thinking_done", "{}")
 			case "delta":
+				fullReply.WriteString(ev.Content)
 				writeSSE("delta", fmt.Sprintf(`{"content":%q}`, ev.Content))
 			case "tool_call":
 				data, _ := json.Marshal(ev)
@@ -115,16 +116,16 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 		}
 	}()
 
-	// persist 落库已收集的对话；terminated=true 时在末尾追加终止标记。
-	// 用 context.Background() 是因为 ctx.Done 分支下原 ctx 已取消，落库不应被取消。
-	persist := func(terminated bool) {
-		<-toolDone // 等待 toolEvents goroutine 结束，确保 toolMsgs 完整
+	// 正文和工具消息都由事件协程收集，等它结束后才能读取并落库。
+	// 取消仅停止生成，不丢弃已接收的正文；历史将在下一次请求中载入。
+	persist := func() {
+		<-toolDone
 		if fullReply.Len() == 0 && len(toolMsgs) == 0 {
 			return
 		}
 		reply := fullReply.String()
-		if terminated && reply != "" {
-			reply += "\n\n该回答此处被用户终止"
+		if ctx.Err() != nil && reply != "" {
+			reply += "\n\n[用户在此处停止回答]"
 		}
 		var convMessages []*schema.Message
 		convMessages = append(convMessages, schema.UserMessage(req.Message))
@@ -136,6 +137,7 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 	}
 
 	defer func() {
+		persist()
 		writeSSE("done", `"done"`)
 	}()
 
@@ -143,7 +145,6 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 		select {
 		case <-ctx.Done():
 			log.Printf("AgentStream(mode=%s): 客户端断开或超时", mode)
-			persist(true)
 			return
 		default:
 		}
@@ -155,36 +156,9 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 
 		if event.Err != nil {
 			writeSSE("error", fmt.Sprintf(`{"error":%q}`, event.Err.Error()))
-			persist(false)
 			return
 		}
-
-		mv := event.Output.MessageOutput
-		if mv == nil {
-			continue
-		}
-
-		if mv.IsStreaming && mv.MessageStream != nil {
-			// delta 事件已由 runLoop 通过 toolEvents 发送，这里只收集内容用于持久化
-			for {
-				chunk, err := mv.MessageStream.Recv()
-				if err != nil {
-					break
-				}
-				if chunk.Content != "" {
-					fullReply.WriteString(chunk.Content)
-				}
-			}
-		} else if mv.Message != nil && mv.Message.Content != "" {
-			fullReply.WriteString(mv.Message.Content)
-			// 非流式消息仍需发送
-			writeSSE("message", fmt.Sprintf(`{"content":%q}`, mv.Message.Content))
-		}
-
 	}
-
-	// 正常结束：持久化完整对话
-	persist(false)
 }
 
 // PermissionResponse 处理前端的权限确认响应

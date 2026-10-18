@@ -295,7 +295,7 @@ export function useChat(options: UseChatOptions) {
         const m = buf[i]
         if (m.role === 'assistant' && m.streaming) {
           m.streaming = false
-          m.content += '\n\n该回答此处被用户终止'
+          m.content += '\n\n[用户在此处停止回答]'
           break
         }
       }

@@ -54,15 +54,15 @@ func (ms *ModelSet) ListModels() []Model {
 	return ms.registry.List()
 }
 
-// ModelSnapshot fixes the execution models and their configuration for one request.
+// ModelSnapshot 固定一次请求使用的模型实例及其配置。
 type ModelSnapshot struct {
 	Config    Model
 	ChatModel model.BaseChatModel
 	ToolModel model.ToolCallingChatModel
 }
 
-// Snapshot prepares both models under the selection lock, so a concurrent
-// Switch cannot mix a new budget or summary model into an in-flight request.
+// Snapshot 在模型选择锁的保护下准备两个模型，避免并发的 Switch 把新预算
+// 或新摘要模型混入正在执行的请求。
 func (ms *ModelSet) Snapshot(ctx context.Context) (ModelSnapshot, error) {
 	ms.mu.Lock()
 	defer ms.mu.Unlock()

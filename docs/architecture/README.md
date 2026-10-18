@@ -74,8 +74,9 @@ GoAgent/
 ```
 
 - 命令命中（builtin/file-based/skill）由前端调 `/api/commands/execute` 短路，不进管线。
-- `pl.Run(ctx, mc)` 顺序调用 Stage；`mc.ToolModel`、`mc.ChatModel` 和本次 Token 预算由 ModelSet 在同一次选型锁内获取，runLoop 复用它们。模型切换只影响后续请求，不会在一次工具循环中途换模型或预算；模型配置文件热加载仍未实现。
-- ContextBuild 先组装完整消息，CompactCheck 再根据完整消息执行微压缩或摘要压缩，完整压缩使用无工具绑定的摘要模型并保留系统消息、近期历史和当前输入。runLoop 首轮不重复压缩相同输入；工具结果加入后再检查。压缩可能因历史太短或摘要失败而保留原文，不宣称能绝对保证不超窗。
+- `pl.Run(ctx, mc)` 顺序调用 Stage；ModelPrep 将本次请求的模型实例和预算写入 `mc`，ContextBuild 每次创建新的请求级 `ContextManager`，避免不同请求、模式和激活 Skill 共享可变 `slots`。
+- ContextBuild 先组装完整消息，CompactCheck 再对最终的 system + history + user 消息统一使用 `contexttool.EstimateTokens` 估算，执行微压缩或摘要压缩；不再用 `len/3` 与固定 Slot 开销混算。完整压缩使用无工具绑定的摘要模型并保留系统消息、近期历史和当前输入。
+- `cl100k_base` 和字符 fallback 都只是请求前估算；Provider 可能使用不同 tokenizer 或包含额外 Chat Template/Tool Schema 开销，因此通过模型配置的安全余量吸收误差，不宣称估算绝对精确。
 - 与原七步规划相比，EventTrigger、Hook 示例及配置启用、非错误 Skip 短路仍未完成；发送阶段明确留在 Stream，不保留空阶段。原计划保留独立 runLoop，不是把每轮工具执行改写为预处理阶段。
 
 ## 3. 斜杠命令系统（对齐 omp 分层）
@@ -117,7 +118,7 @@ GoAgent/
 
 - `~/.claude/commands` 的 file-based 命令依赖用户本机目录，CI/无此目录环境静默跳过。
 - EventBus 与 EventTriggerStage 保留为未接入的扩展代码：生产链路没有创建总线、注册 Hook，也未装配事件阶段；`pre_send`、`post_send` 目前仅有事件名声明。它不是 SSE 工具事件通道，未接入的原因不是 Windows 不支持 Go plugin。
-- MCP 工具在启动阶段完成发现并绑定到模型；配置 Reload 只替换配置，不会自动重建现有模型工具集合。
+- MCP 配置与工具集合在启动阶段加载；没有文件监控或运行时重载入口，配置修改后需重启。
 - SubProxy 当前生产装配仍使用启动时默认模型，不承诺随模型选择器切换；主 Agent 的请求级快照不改变这个独立工具的配置来源。
 - chat 与 aiops 是实际模式；AIOps 提示词的 Plan/Replan 是回答流程指导，不是独立可切换的 plan 模式。连续拒绝只提醒确认权限范围。
 - `read_todo` / `write_todo` 是已注册的 Markdown 文件读写工具，与已删除的旧 TodoStore 无关。仅 chat 模式且两个工具均存在时，连续 5 个非待办工具轮次触发一次提醒；不是任务调度器。
@@ -126,13 +127,15 @@ GoAgent/
 
 ### 7.1 Agent Loop
 
-请求经 SkillExpand、ModelPrep、ContextBuild、CompactCheck 后启动独立 runLoop，执行“模型流式输出 → ToolCall → 权限检查 → 工具执行 → ToolMessage 回填”。单次请求固定对话模型、摘要模型和预算；批准与直接允许共用工具执行和错误处理分支。最多执行 20 个工具轮次，随后请求模型在禁用工具的条件下回答；若提供方仍返回 ToolCall，返回错误而不继续执行。首轮和最终回答都走相同的流式事件路径。
+请求经 SkillExpand、ModelPrep、ContextBuild、CompactCheck 后启动独立 runLoop，执行“模型流式输出 → ToolCall → 权限检查 → 工具执行 → ToolMessage 回填”。ContextManager 是请求级对象；模型、预算和最终消息也固定在本次 `mc` 中。批准与直接允许共用工具执行和错误处理分支。最多执行 20 个工具轮次，随后请求模型在禁用工具的条件下回答；若提供方仍返回 ToolCall，返回错误而不继续执行。首轮和最终回答都走相同的流式事件路径。
 
-HTTP Handler 仍分别消费模型事件和工具事件，但 SSE 的写入和 Flush 共用一把锁，防止首包或事件帧并发写入破坏 HTTP 响应；该锁不改变工具审批或模型循环。
+上下文预算的所有请求前估算统一使用 `contexttool.EstimateTokens`：文本、ToolCall 名称、参数和每条消息开销走同一 tokenizer/fallback；Provider 的真实 usage 若可用只能作为请求后的观测校正，不替代发送前估算。
 
 ### 7.2 MCP 接入
 
 `MCPManager` 管理客户端会话；stdio、旧 SSE 和 Streamable HTTP 的握手与协议编解码由官方 Go SDK 负责。启动时经 initialize 与分页 `tools/list` 获取工具快照，适配器将参数 Schema 转成 Eino `ToolInfo`，工具名规范化并隔离服务器命名空间。Agent 生成 ToolCall 后先经权限判定，适配器保留数字精度转发 `tools/call`，结果经 ToolMessage 进入下一轮并推送 SSE。启动失败回滚会话，应用收到退出信号后关闭连接和子进程。
+
+MCP 配置由每个 `MCPManager` 持有，`LoadMCPConfig` 仅负责磁盘读取。启动初始化、默认配置文件生成和磁盘加载保留；当前配置优先级为可执行文件旁便携配置、用户配置目录、内嵌空配置。已移除闲置的全局配置副本、保存与重载接口；工具适配器直接通过保存的 server/tool 字段路由，不再重复分配无人读取的 `ToolInfo.Extra` 元数据。
 
 ### 7.3 安全与风险
 

@@ -35,11 +35,17 @@ func (m Model) ContextBudgetTokens() int64 {
 
 // BuildChatModel 构建 eino ChatModel（返回具体类型，支持 WithTools）
 func (m *Model) BuildChatModel(ctx context.Context) (*openai.ChatModel, error) {
-	maxTokens := m.MaxCompletionTokens
+	// 只有配置了正数才发送该参数；0 交给服务端默认，避免部分兼容服务把 0
+	// 解释为“不限制”或直接报错。
+	var maxTokens *int
+	if m.MaxCompletionTokens > 0 {
+		value := m.MaxCompletionTokens
+		maxTokens = &value
+	}
 	return openai.NewChatModel(ctx, &openai.ChatModelConfig{
 		Model:               m.ID,
 		APIKey:              m.APIKey,
 		BaseURL:             m.BaseURL,
-		MaxCompletionTokens: &maxTokens,
+		MaxCompletionTokens: maxTokens,
 	})
 }

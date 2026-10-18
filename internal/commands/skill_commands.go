@@ -2,7 +2,6 @@ package commands
 
 import (
 	"context"
-	"fmt"
 	"strings"
 
 	"github.com/LennyFace24/MiniAgent/internal/skills"
@@ -41,9 +40,4 @@ func RegisterSkillCommands(r *Registry, reg *skills.SkillRegistry) {
 			},
 		})
 	}
-}
-
-// FormatSkillCommandText 供测试与前端展示使用
-func FormatSkillCommandText(doc skills.SkillDocument) string {
-	return fmt.Sprintf("skill:%s", doc.Manifest.Name)
 }

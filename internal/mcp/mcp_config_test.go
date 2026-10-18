@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestMCPConfigReloadReadsDiskAndReportsInvalidFiles(t *testing.T) {
+func TestMCPConfigLoadReportsInvalidFiles(t *testing.T) {
 	t.Setenv("GOAGENT_CONFIG", t.TempDir())
 	path, err := GetMCPConfigPath()
 	if err != nil {
@@ -18,28 +18,9 @@ func TestMCPConfigReloadReadsDiskAndReportsInvalidFiles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write(`{"version":"1.0","servers":{"first":{"enabled":false,"transport":"stdio","command":"first"}}}`)
-	manager := NewMCPManager()
-	if err := manager.Init(); err != nil {
-		t.Fatal(err)
-	}
-	write(`{"version":"1.0","servers":{"second":{"enabled":false,"transport":"stdio","command":"second"}}}`)
-	if err := manager.Reload(); err != nil {
-		t.Fatal(err)
-	}
-	status := manager.GetStatus()
-	if _, ok := status["second"]; !ok {
-		t.Fatalf("Reload did not observe disk update: %v", status)
-	}
-	if _, ok := status["first"]; ok {
-		t.Fatal("Reload retained removed configuration")
-	}
 	write(`{"servers":`)
-	if err := manager.Reload(); err == nil {
-		t.Fatal("invalid config silently replaced the active configuration")
-	}
-	if _, ok := manager.GetStatus()["second"]; !ok {
-		t.Fatal("failed Reload discarded the last valid configuration")
+	if _, err := LoadMCPConfig(); err == nil {
+		t.Fatal("invalid config was silently accepted")
 	}
 	if err := os.Remove(path); err != nil {
 		t.Fatal(err)
@@ -52,18 +33,15 @@ func TestMCPConfigReloadReadsDiskAndReportsInvalidFiles(t *testing.T) {
 	}
 }
 
-func TestMCPConfigSaveLoadsFromSelectedDirectory(t *testing.T) {
+func TestMCPConfigLoadsEnabledServersFromSelectedDirectory(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "selected")
 	t.Setenv("GOAGENT_CONFIG", dir)
 	if err := InitConfigDir(); err != nil {
 		t.Fatal(err)
 	}
-	original := &MCPConfig{Version: "1.0", Servers: map[string]*MCPServerConfig{
-		"enabled":  {Enabled: true, Transport: TransportStdio, Command: "server", Env: map[string]string{"TOKEN": "${SECRET}"}},
-		"disabled": {Enabled: false, Transport: TransportSSE, URL: "http://127.0.0.1/sse"},
-		"empty":    nil,
-	}}
-	if err := SaveMCPConfig(original); err != nil {
+	path := filepath.Join(dir, "mcp_servers.json")
+	data := `{"version":"1.0","servers":{"enabled":{"enabled":true,"transport":"stdio","command":"server","env":{"TOKEN":"${SECRET}"}},"disabled":{"enabled":false,"transport":"sse","url":"http://127.0.0.1/sse"},"empty":null}}`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
 		t.Fatal(err)
 	}
 	loaded, err := LoadMCPConfig()
@@ -74,7 +52,7 @@ func TestMCPConfigSaveLoadsFromSelectedDirectory(t *testing.T) {
 	if len(enabled) != 1 || enabled["enabled"].Command != "server" || enabled["enabled"].Env["TOKEN"] != "${SECRET}" {
 		t.Fatalf("wrong enabled config loaded from selected directory: %#v", enabled)
 	}
-	if _, err := os.Stat(filepath.Join(dir, "mcp_servers.json")); err != nil {
-		t.Fatal("selected config was not saved:", err)
+	if _, ok := loaded.Servers["empty"]; ok {
+		t.Fatal("null server remained in the loaded configuration")
 	}
 }

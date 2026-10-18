@@ -99,7 +99,7 @@ func (s *AgentService) Stream(ctx context.Context,
 		}),
 		pipeline.NewModelPrepStage(s.models.Snapshot),
 		pipeline.NewContextBuildStage(func(mc *pipeline.MessageContext) *ctxmgr.ContextManager {
-			cm := ctxmgr.New(mc.CtxState.MaxTokens(), s.skillReg)
+			cm := ctxmgr.New(s.skillReg)
 			return cm
 		}),
 		pipeline.NewCompactCheckStage(contexttool.CompactFunc, s.compactTrigger.IsTriggered),
@@ -241,7 +241,7 @@ func (s *AgentService) runLoop(
 			toolEvents <- ToolEvent{Type: "thinking_done"}
 		}
 
-		// 发送 reply 到 handler 用于持久化
+		// 交付本轮回复给迭代器消费者；HTTP 正文通过 delta 收集，不再重复输出。
 		replyMsg := schema.AssistantMessage(replyContent, nil)
 		gen.Send(adk.EventFromMessage(replyMsg, nil, schema.Assistant, ""))
 

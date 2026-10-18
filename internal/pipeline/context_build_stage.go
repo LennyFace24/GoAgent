@@ -29,7 +29,7 @@ func (s *ContextBuildStage) Process(ctx context.Context, mc *MessageContext) err
 	if s.BuildManager != nil {
 		cm = s.BuildManager(mc)
 	} else {
-		cm = ctxmgr.New(200000, nil)
+		cm = ctxmgr.New(nil)
 	}
 	mc.Manager = cm
 

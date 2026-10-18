@@ -115,7 +115,7 @@ func TestMCPPartialConnectionFailureIsReportedAndClosed(t *testing.T) {
 	defer manager.Close()
 	manager.SetConfig(&MCPConfig{Servers: map[string]*MCPServerConfig{
 		"working": {Enabled: true, Transport: TransportStreamableHTTP, URL: httpServer.URL},
-		"broken":  {Enabled: true, Transport: TransportWebSocket},
+		"broken":  {Enabled: true, Transport: TransportStdio},
 	}})
 	if err := manager.ConnectAll(ctx); err == nil {
 		t.Fatal("partial failure was not reported")

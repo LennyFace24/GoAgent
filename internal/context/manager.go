@@ -1,7 +1,6 @@
 package context
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
@@ -11,8 +10,6 @@ import (
 	"strings"
 
 	"github.com/LennyFace24/MiniAgent/internal/skills"
-	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
-	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/schema"
 )
 
@@ -23,7 +20,8 @@ type Slot struct {
 	Order   int    // 排序，越小越靠前
 }
 
-// ContextManager 负责组装完整的上下文
+// ContextManager 负责组装一次请求的完整上下文。
+// 每个请求创建独立实例；slots 只保存本次请求的动态状态。
 type ContextManager struct {
 	slots            []Slot
 	soulPath         string
@@ -32,11 +30,10 @@ type ContextManager struct {
 	systemPromptPath string // system_prompt.md 路径
 	aiOpsPromptPath  string // ai_ops.md 路径
 	skillReg         *skills.SkillRegistry
-	budget           int64
 }
 
-// New 创建 ContextManager
-func New(budget int64, skillReg *skills.SkillRegistry) *ContextManager {
+// New 创建请求级 ContextManager。
+func New(skillReg *skills.SkillRegistry) *ContextManager {
 	return &ContextManager{
 		soulPath:         filepath.Join("data", "soul.md"),
 		agentPath:        "AGENT.md",
@@ -44,7 +41,6 @@ func New(budget int64, skillReg *skills.SkillRegistry) *ContextManager {
 		systemPromptPath: filepath.Join("internal", "prompt", "system_prompt.md"),
 		aiOpsPromptPath:  filepath.Join("internal", "prompt", "ai_ops.md"),
 		skillReg:         skillReg,
-		budget:           budget,
 	}
 }
 
@@ -142,58 +138,6 @@ func (cm *ContextManager) setSlot(tag, content string, order int) {
 // AppendSlot 追加或更新一个 slot（供管线注入动态内容，如激活的 skill）
 func (cm *ContextManager) AppendSlot(tag, content string, order int) {
 	cm.setSlot(tag, content, order)
-}
-
-// --- 历史消息处理 ---
-
-// BuildHistory 处理历史消息，超预算时压缩
-func (cm *ContextManager) BuildHistory(
-	ctx context.Context,
-	history []*schema.Message,
-	chatModel model.BaseChatModel,
-	sessionID, conversationID string,
-) []*schema.Message {
-	if len(history) == 0 {
-		return history
-	}
-
-	// 计算固定开销
-	fixedCost := cm.estimateFixedCost()
-	availableBudget := cm.budget - fixedCost
-	if availableBudget <= 0 {
-		availableBudget = cm.budget / 2 // 极端情况，给一半预算
-	}
-
-	historyTokens := contexttool.EstimateTokens(history)
-	usagePercent := float64(historyTokens) / float64(availableBudget) * 100
-
-	log.Printf("ContextManager: 历史消息 %d tokens, 可用预算 %d tokens (%.1f%%)", historyTokens, availableBudget, usagePercent)
-
-	// 低于 60% 不压缩
-	if usagePercent < 60 {
-		return history
-	}
-
-	// 60%-85% 微压缩
-	if usagePercent < 85 {
-		log.Printf("ContextManager: 触发 MicroCompact")
-		return contexttool.MicroCompactFunc(history)
-	}
-
-	// 85%+ 完整压缩
-	log.Printf("ContextManager: 触发 CompactFunc")
-	return contexttool.CompactFunc(ctx, history, chatModel, sessionID, conversationID)
-}
-
-// estimateFixedCost 估算固定 slot 的 token 开销
-func (cm *ContextManager) estimateFixedCost() int64 {
-	var total int64
-	for _, s := range cm.slots {
-		total += int64(len(s.Content) / 3) // 粗估：3 字符 ≈ 1 token
-	}
-	// 加上 XML 标签开销，每个 slot 约 20 tokens
-	total += int64(len(cm.slots) * 20)
-	return total
 }
 
 // --- 最终组装 ---

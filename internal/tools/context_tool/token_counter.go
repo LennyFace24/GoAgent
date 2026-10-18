@@ -26,6 +26,10 @@ const (
 	CompactFull                      // Lever 2: old 消息总结为摘要
 )
 
+// messageOverheadTokens is the fixed per-message estimate used by every
+// context-budget calculation in this package.
+const messageOverheadTokens = 4
+
 // ShouldCompact 根据传入的 ContextState 判断是否需要压缩。
 // 阈值基于预算百分比。首次调用（或消息已变化）时重新估算。
 func ShouldCompact(messages []*schema.Message, state *ContextState) CompactLevel {
@@ -50,25 +54,33 @@ func ShouldCompact(messages []*schema.Message, state *ContextState) CompactLevel
 	return CompactNone
 }
 
-
-// EstimateTokens 使用 tiktoken 估算消息的 token 数
-func EstimateTokens(messages []*schema.Message) int {
-	if enc == nil {
-		total := 0
-		for _, m := range messages {
-			total += len(m.Content) / 3
-		}
-		return total
+// EstimateTextTokens estimates one text value with the shared tokenizer and
+// fallback. Callers must not use a second character-based estimate.
+func EstimateTextTokens(text string) int {
+	if text == "" {
+		return 0
 	}
+	if enc == nil {
+		return (len(text) + 2) / 3
+	}
+	return len(enc.Encode(text, nil, nil))
+}
 
+// EstimateTokens estimates the complete message representation used by the
+// context budget checks, including tool-call names, arguments, and per-message
+// protocol overhead.
+func EstimateTokens(messages []*schema.Message) int {
 	total := 0
 	for _, m := range messages {
-		total += len(enc.Encode(m.Content, nil, nil))
-		for _, tc := range m.ToolCalls {
-			total += len(enc.Encode(tc.Function.Name, nil, nil))
-			total += len(enc.Encode(tc.Function.Arguments, nil, nil))
+		if m == nil {
+			continue
 		}
-		total += 4
+		total += EstimateTextTokens(m.Content)
+		for _, tc := range m.ToolCalls {
+			total += EstimateTextTokens(tc.Function.Name)
+			total += EstimateTextTokens(tc.Function.Arguments)
+		}
+		total += messageOverheadTokens
 	}
 	return total
 }

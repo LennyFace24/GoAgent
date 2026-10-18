@@ -16,11 +16,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// MCPManager manages configured MCP client sessions and adapts their tools.
+// MCPManager 管理已配置的 MCP 客户端会话，并把远端工具适配给上层。
 //
-// Close and ConnectAll guard the session map with a closed flag so a session
-// can never be installed after shutdown: a late connect closes its own session
-// instead of leaking it.
+// Close 和 ConnectAll 通过 closed 标志保护会话表，保证关闭后不会再安装新会话：
+// 迟到的连接会自行关闭会话，而不是泄漏。
 type MCPManager struct {
 	mu      sync.RWMutex
 	config  *MCPConfig
@@ -28,7 +27,7 @@ type MCPManager struct {
 	closed  bool
 }
 
-// newTransport builds the real SDK transport described by the config.
+// newTransport 按配置构建真实的 SDK 传输层。
 func newTransport(config *MCPServerConfig) (mcp.Transport, error) {
 	switch config.Transport {
 	case TransportStdio:
@@ -39,18 +38,21 @@ func newTransport(config *MCPServerConfig) (mcp.Transport, error) {
 		cmd.Env = mergeEnv(os.Environ(), config.Env)
 		return &mcp.CommandTransport{Command: cmd}, nil
 	case TransportSSE:
-		return &persistentSSETransport{delegate: &mcp.SSEClientTransport{Endpoint: config.URL, HTTPClient: newHTTPClient(config.URL, config.Headers)}}, nil
+		return &persistentSSETransport{
+			delegate: &mcp.SSEClientTransport{
+				Endpoint:   config.URL,
+				HTTPClient: newHTTPClient(config.URL, config.Headers)}}, nil
 	case TransportStreamableHTTP:
-		return &mcp.StreamableClientTransport{Endpoint: config.URL, HTTPClient: newHTTPClient(config.URL, config.Headers)}, nil
-	case TransportWebSocket:
-		return nil, fmt.Errorf("websocket MCP transport is not supported by the Go MCP SDK")
+		return &mcp.StreamableClientTransport{
+			Endpoint:   config.URL,
+			HTTPClient: newHTTPClient(config.URL, config.Headers)}, nil
 	default:
 		return nil, fmt.Errorf("unsupported MCP transport: %s", config.Transport)
 	}
 }
 
-// The SDK's legacy SSE GET inherits its connect context. Keep the established
-// stream alive after startup ends, but still cancel a blocked connection attempt.
+// SDK 旧版 SSE 的 GET 会继承建立连接时的 context。这里让已建立的流在启动阶段
+// 结束后继续存活，同时仍能取消被阻塞的连接尝试。
 type persistentSSETransport struct {
 	delegate *mcp.SSEClientTransport
 }
@@ -82,26 +84,23 @@ func (c *persistentSSEConnection) Close() error {
 	return c.Connection.Close()
 }
 
-// mergeEnv returns base with the configured entries appended, so a configured
-// value wins over any inherited one.
+// mergeEnv 在 base 之后追加配置的环境变量，使配置值覆盖继承值。
 //
-// Entries are appended rather than merged in place: exec dedups keeping the
-// last occurrence of each key (case-insensitively on Windows), so on Windows an
-// inherited entry with different casing would otherwise survive and be picked
-// up by a case-insensitive child.
+// 这里选择追加而不是原地合并：exec 对同名键保留最后一次出现（Windows 上不区分大小写）。
+// 若原地合并，Windows 上大小写不同的继承项可能残留，并被不区分大小写的子进程取到。
 func mergeEnv(base []string, configured map[string]string) []string {
 	entries := make([]string, 0, len(base)+len(configured))
 	entries = append(entries, base...)
 	for key, value := range configured {
 		entries = append(entries, key+"="+os.ExpandEnv(value))
 	}
-	// Order of the config map is random; sort for a deterministic child env.
+	// 配置 map 的遍历顺序是随机的，排序以保证子进程环境变量顺序确定。
 	slices.Sort(entries[len(base):])
 	return entries
 }
 
-// newHTTPClient returns a client that sends the configured headers to the
-// configured origin, or nil to let the SDK use http.DefaultClient.
+// newHTTPClient 返回一个只向配置的 origin 发送配置请求头的客户端；
+// 返回 nil 表示让 SDK 使用 http.DefaultClient。
 func newHTTPClient(endpoint string, headers map[string]string) *http.Client {
 	if len(headers) == 0 {
 		return nil
@@ -117,15 +116,12 @@ func newHTTPClient(endpoint string, headers map[string]string) *http.Client {
 	}}
 }
 
-// headerRoundTripper adds configured headers, but only to the configured
-// origin.
+// headerRoundTripper 只向配置的 origin 添加配置的请求头。
 //
-// net/http strips sensitive headers (Authorization, Cookie,
-// WWW-Authenticate) before following a cross-origin redirect precisely so a
-// token is not forwarded to another host. Re-applying them here would undo
-// that, and the legacy SSE transport derives its message endpoint from the
-// server at runtime, so the destination is not known up front. A request to
-// any other origin therefore fails loudly instead of leaking the secret.
+// net/http 在跟随跨域重定向之前会剥离敏感头（Authorization、Cookie、
+// WWW-Authenticate），正是为了防止令牌被转发到其他主机。这里若重新添加就会
+// 破坏该保护；而旧版 SSE 传输在运行时才从服务端获知消息端点，目标地址事先未知。
+// 因此发往其他 origin 的请求会直接失败，而不是泄漏密钥。
 type headerRoundTripper struct {
 	base    http.RoundTripper
 	headers map[string]string
@@ -139,7 +135,7 @@ func (t *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	if len(t.headers) == 0 {
 		return t.base.RoundTrip(req)
 	}
-	// Clone so the caller's request is never mutated.
+	// 克隆请求，避免修改调用方的原始请求。
 	clone := req.Clone(req.Context())
 	for key, value := range t.headers {
 		clone.Header.Set(key, value)
@@ -147,7 +143,7 @@ func (t *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	return t.base.RoundTrip(clone)
 }
 
-// allows reports whether the request targets the configured origin.
+// allows 判断请求是否指向配置的 origin。
 func (t *headerRoundTripper) allows(req *http.Request) bool {
 	if t.origin == "" || t.origin == "://" {
 		return true
@@ -155,8 +151,7 @@ func (t *headerRoundTripper) allows(req *http.Request) bool {
 	return req.URL.Scheme+"://"+req.URL.Host == t.origin
 }
 
-// originOf returns the scheme://host part of endpoint, which is what a
-// redirect may legitimately change.
+// originOf 返回 endpoint 的 scheme://host 部分，也就是重定向时允许变化的部分。
 func originOf(endpoint string) string {
 	parsed, err := url.Parse(endpoint)
 	if err != nil {
@@ -169,15 +164,15 @@ func NewMCPManager() *MCPManager {
 	return &MCPManager{servers: make(map[string]*mcp.ClientSession)}
 }
 
-// SetConfig installs a configuration for callers that already loaded one.
-// It is primarily useful for embedding GoAgent and deterministic tests.
+// SetConfig 安装一份已经加载好的配置。
+// 主要用于嵌入 GoAgent 以及需要确定性的测试。
 func (m *MCPManager) SetConfig(config *MCPConfig) {
 	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.config = config
-	m.mu.Unlock()
 }
 
-// Init 初始化：加载配置
+// Init 初始化：创建配置目录并加载配置。
 func (m *MCPManager) Init() error {
 	if err := InitConfigDir(); err != nil {
 		return fmt.Errorf("初始化配置目录失败: %w", err)
@@ -194,10 +189,10 @@ func (m *MCPManager) Init() error {
 	return nil
 }
 
-// ConnectAll 连接所有启用的服务器
+// ConnectAll 连接所有已启用的服务器。
 //
-// Connections run concurrently. Successes are retained for callers that allow
-// partial connectivity; production startup closes the manager on any failure.
+// 连接并发执行；允许部分连接失败的调用方可以保留成功的连接；
+// 生产启动路径会在任意失败时关闭管理器。
 func (m *MCPManager) ConnectAll(ctx context.Context) error {
 	m.mu.RLock()
 	if m.closed {
@@ -228,8 +223,8 @@ func (m *MCPManager) ConnectAll(ctx context.Context) error {
 			defer wg.Done()
 			if err := m.connectServer(ctx, name, enabled[name]); err != nil {
 				mu.Lock()
+				defer mu.Unlock()
 				errs = append(errs, fmt.Errorf("connect %s: %w", name, err))
-				mu.Unlock()
 			}
 		}(name)
 	}
@@ -255,13 +250,11 @@ func (m *MCPManager) connectServer(ctx context.Context, name string, config *MCP
 		return fmt.Errorf("connect: %w", err)
 	}
 
-	// installSession stores cs, or reports that the manager is closed. Holding
-	// the lock here is cheap: the SDK session is already established, so no
-	// blocking work happens under it.
+	// installSession 会保存会话，或报告管理器已关闭。这里持锁开销很小：
+	// SDK 会话已经建立，锁内没有阻塞操作。
 	old, installed := m.installSession(name, cs)
 	if !installed {
-		// Shutdown raced with this connect: close the session here so it is
-		// never leaked, and report why it was discarded.
+		// 关闭流程与本次连接竞争：在这里关闭会话，避免泄漏，并说明丢弃原因。
 		return errors.Join(fmt.Errorf("MCP manager is closed, session for %s discarded", name), cs.Close())
 	}
 	if old != nil {
@@ -270,7 +263,7 @@ func (m *MCPManager) connectServer(ctx context.Context, name string, config *MCP
 	return nil
 }
 
-// installSession stores the session unless the manager is already closed.
+// installSession 在管理器尚未关闭时保存会话。
 func (m *MCPManager) installSession(name string, cs *mcp.ClientSession) (old *mcp.ClientSession, installed bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -302,11 +295,10 @@ func (m *MCPManager) GetAllSessions() map[string]*mcp.ClientSession {
 	return result
 }
 
-// Tools adapts all tools from connected servers for Eino's model/tool loop.
+// Tools 把所有已连接服务器的工具适配给 Eino 的模型/工具循环。
 //
-// Servers are visited in deterministic (sorted) order. Two tools that export
-// the same name are rejected instead of leaving the dispatch ambiguous: the
-// model would call whichever adapter came first.
+// 按确定顺序（排序）遍历服务器。两个工具导出同名时直接报错，避免分发歧义：
+// 否则模型会调用先注册的那个适配器。
 func (m *MCPManager) Tools(ctx context.Context) ([]tool.BaseTool, error) {
 	sessions := m.GetAllSessions()
 
@@ -328,10 +320,7 @@ func (m *MCPManager) Tools(ctx context.Context) ([]tool.BaseTool, error) {
 			if err != nil {
 				return nil, err
 			}
-			info, err := adapted.Info(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("MCP server %s: %w", serverName, err)
-			}
+			info := adapted.info
 			if owner, ok := seen[info.Name]; ok {
 				return nil, fmt.Errorf("MCP tool name collision: %q is exported by both %q and %q", info.Name, owner, serverName)
 			}
@@ -342,10 +331,9 @@ func (m *MCPManager) Tools(ctx context.Context) ([]tool.BaseTool, error) {
 	return tools, nil
 }
 
-// ListTools lists tools exposed by one connected MCP server.
+// ListTools 列出某个已连接 MCP 服务器暴露的工具。
 //
-// The iterator walks every page, so a server that paginates its tool list is
-// fully discovered.
+// 迭代器会遍历所有分页，因此分页返回工具列表的服务器也能被完整发现。
 func (m *MCPManager) ListTools(ctx context.Context, serverName string) ([]*mcp.Tool, error) {
 	session, exists := m.GetSession(serverName)
 	if !exists {
@@ -362,7 +350,7 @@ func (m *MCPManager) ListTools(ctx context.Context, serverName string) ([]*mcp.T
 	return tools, nil
 }
 
-// CallTool calls a tool on one connected MCP server.
+// CallTool 在某个已连接的 MCP 服务器上调用工具。
 func (m *MCPManager) CallTool(ctx context.Context, serverName, toolName string, args map[string]any) (*mcp.CallToolResult, error) {
 	session, exists := m.GetSession(serverName)
 	if !exists {
@@ -373,20 +361,6 @@ func (m *MCPManager) CallTool(ctx context.Context, serverName, toolName string, 
 		Name:      toolName,
 		Arguments: args,
 	})
-}
-
-// Reload reloads the configuration and replaces the in-memory config.
-// Existing sessions are intentionally kept until the caller reconnects or closes them.
-func (m *MCPManager) Reload() error {
-	config, err := LoadMCPConfig()
-	if err != nil {
-		return err
-	}
-
-	m.mu.Lock()
-	m.config = config
-	m.mu.Unlock()
-	return nil
 }
 
 // GetStatus 获取所有服务器状态
@@ -427,12 +401,10 @@ func (m *MCPManager) GetStatus() map[string]ServerStatus {
 	return status
 }
 
-// Close 关闭所有连接
+// Close 关闭所有连接。
 //
-// The manager is marked closed before any session is touched, so a session
-// installed by an in-flight connect is not reachable and is closed by that
-// connect instead of being leaked. Sessions are closed after the lock is
-// released because Close blocks on the peer.
+// 在触碰任何会话之前先把管理器标记为已关闭，这样正在建立中的连接安装的会话不可达，
+// 会由该连接自行关闭，而不是泄漏。会话在释放锁之后关闭，因为 Close 会阻塞等待对端。
 func (m *MCPManager) Close() error {
 	m.mu.Lock()
 	if m.closed {
@@ -460,7 +432,7 @@ func (m *MCPManager) Close() error {
 type ServerStatus struct {
 	Name        string `json:"name"`
 	Enabled     bool   `json:"enabled"`
-	State       string `json:"state"` // disabled, disconnected, connected
+	State       string `json:"state"` // disabled、disconnected、connected
 	Transport   string `json:"transport"`
 	Description string `json:"description"`
 }

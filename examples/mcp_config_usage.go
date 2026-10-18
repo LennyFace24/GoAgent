@@ -47,5 +47,5 @@ func main() {
 	// 6. 显示配置文件位置
 	configPath, _ := mcp.GetMCPConfigPath()
 	fmt.Printf("\n配置文件位置: %s\n", configPath)
-	fmt.Println("\n提示: 配置变更后重启服务；Reload 仅重读配置，不刷新 Agent 的工具快照。")
+	fmt.Println("\n提示: 配置变更后重启服务，重新建立 MCP 连接并发现工具。")
 }

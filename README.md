@@ -275,7 +275,7 @@ curl -X POST http://localhost:8080/api/search \
 MCP 接入支持：
 
 - 从 `GOAGENT_CONFIG` 指定目录或用户配置目录加载 `mcp_servers.json`。
-- 通过 stdio、SSE、Streamable HTTP 连接已启用的 MCP Server。
+- 仅支持 stdio、SSE、Streamable HTTP 三种 MCP 传输，远程服务优先使用 Streamable HTTP。
 - 在启动时发现远程工具，将其 JSON Schema 转换为 Eino 工具定义，并在 Agent Loop 中转发调用。
 - 工具名使用 `mcp__<server>__<tool>`；超长、特殊字符及歧义名称附加稳定哈希，保证模型允许的字符集与 64 字符长度限制。
 - MCP 调用复用现有 `allow / ask / deny` 权限链路；未匹配规则时询问用户，批准后才发送 `tools/call`。
@@ -286,7 +286,6 @@ MCP 接入支持：
 - 任务依赖调度系统目前仍是骨架，尚未形成完整的任务编排能力。
 - 多 Agent 团队协作尚未实现完整的 Planner/Executor 协同流程。
 - 没有独立可切换的 plan 模式；AIOps 中的“计划/执行/重规划”属于提示词流程。连续权限拒绝只提示确认执行范围，不会切换运行模式。
-- WebSocket MCP 传输暂未由当前 Go MCP SDK 支持。
 - 长期记忆、MCP Server 配置管理 API 以及运行时无损热替换尚未完成。
 - 当前 SDK 会将 `structuredContent` 中的 JSON 数字解码为 `float64`；超过安全整数范围的标识符应由 MCP Server 返回字符串。工具调用入参使用 `json.Number` 保留精度。
 - API 请求和响应模型、鉴权策略以及生产环境部署文档仍需要进一步完善。

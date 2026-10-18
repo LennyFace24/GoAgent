@@ -12,8 +12,8 @@ import (
 
 const bigIntegerLiteral = "9007199254740993"
 
-// TestExportedToolNameIsModelSafeAndBounded checks the name handed to the model
-// is always within the provider limit and uses only [A-Za-z0-9_-].
+// TestExportedToolNameIsModelSafeAndBounded 检查交给模型的工具名始终在提供方限制内，
+// 并且只包含 [A-Za-z0-9_-]。
 func TestExportedToolNameIsModelSafeAndBounded(t *testing.T) {
 	cases := []struct{ server, tool string }{
 		{"demo", "greet"},
@@ -50,9 +50,8 @@ func TestExportedToolNameIsModelSafeAndBounded(t *testing.T) {
 	}
 }
 
-// TestExportedToolNameSeparatorCollisions guards the tuple ambiguity that "__"
-// inside server or tool names would otherwise create: ("a__b", "c") and
-// ("a", "b__c") must not render as the same name.
+// TestExportedToolNameSeparatorCollisions 防范 "__" 出现在 server 或 tool 名中
+// 造成的元组歧义：("a__b", "c") 和 ("a", "b__c") 不能渲染成同一个名字。
 func TestExportedToolNameSeparatorCollisions(t *testing.T) {
 	first := exportedToolName("a__b", "c")
 	second := exportedToolName("a", "b__c")
@@ -63,7 +62,7 @@ func TestExportedToolNameSeparatorCollisions(t *testing.T) {
 		t.Fatalf("hashed names must stay model safe: %q, %q", first, second)
 	}
 
-	// Long names must not collide after truncation either.
+	// 长名字截断后也不能冲突。
 	pairs := [][2][2]string{
 		{{strings.Repeat("s", 60) + "A", "t"}, {strings.Repeat("s", 60) + "B", "t"}},
 		{{"srv", strings.Repeat("t", 60) + "A"}, {"srv", strings.Repeat("t", 60) + "B"}},
@@ -89,9 +88,8 @@ func isModelSafeName(name string) bool {
 	return true
 }
 
-// TestNewMCPToolRejectsBrokenInputSchema ensures a missing or non-object schema
-// fails instead of being replaced by an empty object schema, which would tell
-// the model that any argument is valid.
+// TestNewMCPToolRejectsBrokenInputSchema 确保 schema 缺失或不是对象时直接失败，
+// 而不是替换成空 object schema——那会告诉模型任意参数都合法。
 func TestNewMCPToolRejectsBrokenInputSchema(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -117,8 +115,8 @@ func TestNewMCPToolRejectsBrokenInputSchema(t *testing.T) {
 	}
 }
 
-// TestNewMCPToolPreservesComplexSchema checks nested properties, required,
-// $defs/$ref and union keywords survive the conversion to Eino's JSON schema.
+// TestNewMCPToolPreservesComplexSchema 检查嵌套属性、required、$defs/$ref
+// 和 union 关键字在转换成 Eino JSON schema 后仍然保留。
 func TestNewMCPToolPreservesComplexSchema(t *testing.T) {
 	remote := &sdkmcp.Tool{
 		Name: "configure",
@@ -174,8 +172,8 @@ func TestNewMCPToolPreservesComplexSchema(t *testing.T) {
 
 }
 
-// TestDecodeArgumentsKeepsLargeIntegerPrecision ensures integers beyond float64
-// precision are not silently rounded on their way to the MCP server.
+// TestDecodeArgumentsKeepsLargeIntegerPrecision 确保超出 float64 精度的整数
+// 在发往 MCP 服务器时不会被静默舍入。
 func TestDecodeArgumentsKeepsLargeIntegerPrecision(t *testing.T) {
 	args, err := decodeArguments(`{"id":` + bigIntegerLiteral + `,"nested":{"seq":12345678901234567890}}`)
 	if err != nil {
@@ -198,7 +196,7 @@ func TestDecodeArgumentsKeepsLargeIntegerPrecision(t *testing.T) {
 		t.Fatalf("nested.seq = %s, want 12345678901234567890", got)
 	}
 
-	// The value must survive re-marshaling onto the wire unchanged.
+	// 该值重新序列化发到线上后必须保持不变。
 	data, err := json.Marshal(args)
 	if err != nil {
 		t.Fatalf("Marshal() error: %v", err)
@@ -208,8 +206,8 @@ func TestDecodeArgumentsKeepsLargeIntegerPrecision(t *testing.T) {
 	}
 }
 
-// TestDecodeArgumentsRejectsInvalidJSON blocks non-object and trailing payloads
-// instead of silently dropping or partially applying them.
+// TestDecodeArgumentsRejectsInvalidJSON 拒绝非对象和带尾部内容的负载，
+// 而不是静默丢弃或部分应用。
 func TestDecodeArgumentsRejectsInvalidJSON(t *testing.T) {
 	for _, raw := range []string{`[1,2]`, `null`, `"text"`, `{"a":1}garbage`, `{"a":}`, `{} {}`, `{} ]`, `{} 42`} {
 		if _, err := decodeArguments(raw); err == nil {
@@ -226,7 +224,7 @@ func TestDecodeArgumentsRejectsInvalidJSON(t *testing.T) {
 	}
 }
 
-// TestRenderCallToolResultTextOnly keeps plain successful text as plain text.
+// TestRenderCallToolResultTextOnly 保持成功的纯文本结果仍为纯文本。
 func TestRenderCallToolResultTextOnly(t *testing.T) {
 	result := &sdkmcp.CallToolResult{Content: []sdkmcp.Content{
 		&sdkmcp.TextContent{Text: "hello"},
@@ -242,8 +240,8 @@ func TestRenderCallToolResultTextOnly(t *testing.T) {
 	}
 }
 
-// TestRenderCallToolResultPreservesToolError keeps MCP tool-level failures
-// visible to the model as data (never a Go error) and preserves isError.
+// TestRenderCallToolResultPreservesToolError 让 MCP 工具级失败以数据形式
+// 对模型可见（绝不变成 Go 错误），并保留 isError。
 func TestRenderCallToolResultPreservesToolError(t *testing.T) {
 	result := &sdkmcp.CallToolResult{
 		Content: []sdkmcp.Content{&sdkmcp.TextContent{Text: "boom"}},
@@ -267,8 +265,8 @@ func TestRenderCallToolResultPreservesToolError(t *testing.T) {
 	}
 }
 
-// TestRenderCallToolResultPreservesStructuredAndMixedContent ensures structured
-// and non-text output are not flattened away.
+// TestRenderCallToolResultPreservesStructuredAndMixedContent 确保结构化内容
+// 和非文本输出不会被扁平化丢失。
 func TestRenderCallToolResultPreservesStructuredAndMixedContent(t *testing.T) {
 	result := &sdkmcp.CallToolResult{
 		Content:           []sdkmcp.Content{&sdkmcp.TextContent{Text: "summary"}, &sdkmcp.ImageContent{MIMEType: "image/png", Data: []byte("AA")}},
@@ -297,7 +295,7 @@ func TestRenderCallToolResultPreservesStructuredAndMixedContent(t *testing.T) {
 		t.Fatalf("structuredContent lost: %v", decoded.StructuredContent)
 	}
 
-	// Structured output alone must also be preserved.
+	// 只有结构化输出时也必须保留。
 	structuredOnly := &sdkmcp.CallToolResult{StructuredContent: map[string]any{"value": "x"}}
 	got, err = renderCallToolResult("demo", "chart", structuredOnly)
 	if err != nil {
@@ -308,8 +306,8 @@ func TestRenderCallToolResultPreservesStructuredAndMixedContent(t *testing.T) {
 	}
 }
 
-// TestRenderCallToolResultNilIsError makes a missing result a Go error instead
-// of a fake success message.
+// TestRenderCallToolResultNilIsError 让缺失结果返回 Go 错误，
+// 而不是伪造一条成功消息。
 func TestRenderCallToolResultNilIsError(t *testing.T) {
 	if _, err := renderCallToolResult("demo", "greet", nil); err == nil {
 		t.Fatal("renderCallToolResult(nil) unexpectedly succeeded")
@@ -326,13 +324,12 @@ func TestRenderCallToolResultReportsUnencodableOutput(t *testing.T) {
 	}
 }
 
-// TestMCPToolInvokableRunKeepsIntegerOverSession drives a real SDK session to
-// prove the decoded argument reaches the remote tool without precision loss,
-// and that routing uses the captured tuple rather than the exported name.
+// TestMCPToolInvokableRunKeepsIntegerOverSession 通过真实 SDK 会话验证：
+// 解码后的参数到达远端工具时没有精度损失，并且路由使用的是保存的元组
+// 而不是导出名。
 //
-// The server registers a raw handler so arguments are read verbatim: the typed
-// AddTool path re-marshals arguments through float64 inside the SDK and would
-// round the integer regardless of what this adapter sends.
+// 服务端注册的是原始 handler，因此参数按原样读取：SDK 的 AddTool 类型化路径
+// 会通过 float64 重新序列化参数，无论本适配器发送什么，都会把整数舍入。
 func TestMCPToolInvokableRunKeepsIntegerOverSession(t *testing.T) {
 	const serverName = "demo server"
 
@@ -378,9 +375,6 @@ func TestMCPToolInvokableRunKeepsIntegerOverSession(t *testing.T) {
 	if !isModelSafeName(info.Name) || len(info.Name) > exportedNameMaxLen {
 		t.Fatalf("exported name is not model safe/bounded: %q", info.Name)
 	}
-	if info.Extra["mcp_server"] != serverName || info.Extra["mcp_tool"] != "echo_id" {
-		t.Fatalf("routing tuple lost: %#v", info.Extra)
-	}
 
 	invokable, ok := adapted[0].(interface {
 		InvokableRun(ctx context.Context, argumentsInJSON string, opts ...tool.Option) (string, error)
@@ -401,8 +395,8 @@ func TestMCPToolInvokableRunKeepsIntegerOverSession(t *testing.T) {
 	}
 }
 
-// TestMCPToolInvokableRunPropagatesProtocolError makes transport/protocol
-// failures Go errors instead of tool output.
+// TestMCPToolInvokableRunPropagatesProtocolError 让传输/协议失败返回 Go 错误，
+// 而不是当作工具输出。
 func TestMCPToolInvokableRunPropagatesProtocolError(t *testing.T) {
 	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)
@@ -421,7 +415,7 @@ func TestMCPToolInvokableRunPropagatesProtocolError(t *testing.T) {
 	manager := NewMCPManager()
 	manager.servers["demo"] = clientSession
 
-	// A tool that the server does not expose produces an MCP protocol error.
+	// 服务器未暴露的工具会产生 MCP 协议错误。
 	adapted, err := newMCPTool(manager, "demo", &sdkmcp.Tool{
 		Name:        "missing",
 		InputSchema: json.RawMessage(`{"type":"object"}`),
@@ -438,9 +432,8 @@ func TestMCPToolInvokableRunPropagatesProtocolError(t *testing.T) {
 	}
 }
 
-// TestMCPToolInvokableRunReturnsToolErrorAsData drives a real session whose
-// tool reports a tool-level failure: the model must receive the failure as tool
-// output carrying isError, never as a Go error.
+// TestMCPToolInvokableRunReturnsToolErrorAsData 通过真实会话验证工具级失败：
+// 模型必须以携带 isError 的工具输出形式收到失败，绝不能变成 Go 错误。
 func TestMCPToolInvokableRunReturnsToolErrorAsData(t *testing.T) {
 	clientTransport, serverTransport := sdkmcp.NewInMemoryTransports()
 	server := sdkmcp.NewServer(&sdkmcp.Implementation{Name: "test-server", Version: "1.0.0"}, nil)

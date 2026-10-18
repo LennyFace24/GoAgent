@@ -29,6 +29,27 @@ func TestRenderTemplateNoPlaceholderAppendsArgs(t *testing.T) {
 	}
 }
 
+func TestRenderTemplateAppendsOnlyUnconsumedPositionalArgs(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		args []string
+		want string
+	}{
+		{name: "no placeholder", body: "任务", args: []string{"a", "b", "c"}, want: "任务\n\na b c"},
+		{name: "one positional leaves tail", body: "任务 $1", args: []string{"a", "b", "c"}, want: "任务 a\n\nb c"},
+		{name: "all positional consumed", body: "任务 $1 $2", args: []string{"a", "b"}, want: "任务 a b"},
+		{name: "one positional consumes only arg", body: "任务 $1", args: []string{"a"}, want: "任务 a"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := RenderTemplate(test.body, test.args); got != test.want {
+				t.Fatalf("RenderTemplate = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
 func TestRenderTemplateNoArgsKeepsBody(t *testing.T) {
 	got := RenderTemplate("展示当前状态", nil)
 	if got != "展示当前状态" {
