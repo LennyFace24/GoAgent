@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, nextTick } from 'vue'
 import { useConversations } from '../composables/useConversations'
+import type { Conversation } from '../types'
 import {
   MessageSquare,
   BarChart3,
@@ -12,6 +13,7 @@ import {
   X,
   Search,
   Layers,
+  Pencil,
 } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -23,14 +25,56 @@ const props = defineProps<{
 const emit = defineEmits<{
   'select': [id: string]
   'created': [id: string]
+  'deleted': [id: string]
   'dashboard-view': [view: string]
 }>()
 
-const { conversations, load, create, remove } = useConversations()
+const { conversations, create, rename, remove } = useConversations()
 const searchQuery = ref('')
+const editingId = ref('')
+const editingTitle = ref('')
 const isUploading = ref(false)
 const uploadProgress = ref(0)
 const docsList = ref<string[]>([])
+
+async function handleCreate(): Promise<void> {
+  const id = await create()
+  if (id) emit('created', id)
+}
+
+async function handleDelete(id: string, event: MouseEvent): Promise<void> {
+  event.stopPropagation()
+  if (await remove(id)) emit('deleted', id)
+}
+
+async function startRename(conv: Conversation): Promise<void> {
+  editingId.value = conv.id
+  editingTitle.value = conv.title
+  await nextTick()
+  const input = document.querySelector<HTMLInputElement>('[data-rename-input]')
+  input?.focus()
+  input?.select()
+}
+
+async function commitRename(): Promise<void> {
+  const id = editingId.value
+  if (!id) return
+  const title = editingTitle.value.trim()
+  if (!title || title === conversations.value.find((c) => c.id === id)?.title) {
+    editingId.value = ''
+    editingTitle.value = ''
+    return
+  }
+  if (await rename(id, title)) {
+    editingId.value = ''
+    editingTitle.value = ''
+  }
+}
+
+function cancelRename(): void {
+  editingId.value = ''
+  editingTitle.value = ''
+}
 
 // ---------- 宽度可调 + 收起/展开 ----------
 const MIN_WIDTH = 160
@@ -135,9 +179,29 @@ function expand() {
             class="conv-item"
             :class="{ active: activeId === conv.id }"
             @click="emit('select', conv.id)"
+            @dblclick="startRename(conv)"
           >
             <span class="item-glyph"><MessageSquare :size="14" :stroke-width="1.8" /></span>
-            <span class="item-title">{{ conv.title }}</span>
+            <input
+              v-if="editingId === conv.id"
+              v-model="editingTitle"
+              class="rename-input"
+              data-rename-input
+              maxlength="100"
+              @click.stop
+              @keydown.enter.prevent="commitRename"
+              @keydown.esc.prevent="cancelRename"
+              @blur="commitRename"
+            />
+            <span v-else class="item-title" :title="conv.title">{{ conv.title }}</span>
+            <button
+              v-if="editingId !== conv.id"
+              class="rename-item-btn"
+              @click.stop="startRename(conv)"
+              title="重命名"
+            >
+              <Pencil :size="12" :stroke-width="2.2" />
+            </button>
             <button class="delete-item-btn" @click="handleDelete(conv.id, $event)" title="删除">
               <X :size="13" :stroke-width="2.2" />
             </button>
@@ -486,6 +550,45 @@ function expand() {
   overflow: hidden;
   text-overflow: ellipsis;
   flex: 1;
+}
+
+.rename-input {
+  flex: 1;
+  min-width: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border-focus);
+  border-radius: var(--radius-xs);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-family: var(--font-sans);
+  padding: 2px 6px;
+  outline: none;
+}
+
+.rename-item-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  width: 22px;
+  height: 22px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  transition: all var(--transition-spring);
+}
+
+.conv-item:hover .rename-item-btn {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.rename-item-btn:hover {
+  color: var(--accent-bright);
+  background: var(--accent-soft);
 }
 
 .delete-item-btn {

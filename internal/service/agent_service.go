@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log"
 	"strings"
 	"time"
@@ -56,7 +58,7 @@ func NewAgentService(toolHandler *tools.ToolHandler, convStore *store.Conversati
 		models:         models,
 		tools:          tools_,
 		compactTrigger: toolHandler.CompactTrigger,
-		perms:          permission.NewPermissionManager(permission.ModeDefault),
+		perms:          permission.NewPermissionManager(),
 		skillReg:       skills.NewSkillRegistry(),
 	}
 }
@@ -75,8 +77,7 @@ func (s *AgentService) SwitchModel(ctx context.Context, id string) error {
 	return nil
 }
 
-// Stream prepares a request-level model snapshot, assembles its context, and
-// compacts the complete message list before starting the tool loop.
+// Stream 准备请求级模型快照、组装上下文，并在启动工具循环前压缩完整消息列表。
 func (s *AgentService) Stream(ctx context.Context,
 	mode string, sessionID string, conversationID string, userMsg string) (*adk.AsyncIterator[*adk.AgentEvent], chan ToolEvent, error) {
 
@@ -88,7 +89,7 @@ func (s *AgentService) Stream(ctx context.Context,
 
 	globalState := contexttool.GetContextState()
 
-	// Budget checking runs after slot assembly so it includes system and user input.
+	// 预算检查在槽位组装之后执行，因此会把 system 和当前用户输入计入。
 	pl := pipeline.New(
 		pipeline.NewSkillExpandStage(func(text string) (*skills.SkillDocument, bool) {
 			doc := s.skillReg.Match(text)
@@ -124,45 +125,68 @@ func (s *AgentService) Stream(ctx context.Context,
 	return iterator, toolEvents, nil
 }
 
-// collectTurn 读取一轮模型流，推送 thinking_delta/delta 事件到 toolEvents，
-// 并累积跨 chunk 分片的 tool_calls，返回本轮的 toolCalls、思考内容与回复内容。
-func collectTurn(stream *schema.StreamReader[*schema.Message], toolEvents chan<- ToolEvent) (toolCalls []schema.ToolCall, thinking, reply string) {
+type collectedTurn struct {
+	toolCalls    []schema.ToolCall
+	thinking     string
+	reply        string
+	finishReason string
+	err          error
+}
+
+func collectTurnWithMeta(stream *schema.StreamReader[*schema.Message], toolEvents chan<- ToolEvent) collectedTurn {
+	var result collectedTurn
 	var thinkingBuilder, replyBuilder strings.Builder
 	for {
 		chunk, err := stream.Recv()
 		if err != nil {
+			if !errors.Is(err, io.EOF) {
+				result.err = err
+			}
 			break
+		}
+		if chunk == nil {
+			continue
+		}
+		if chunk.ResponseMeta != nil && chunk.ResponseMeta.FinishReason != "" {
+			result.finishReason = chunk.ResponseMeta.FinishReason
 		}
 		if chunk.ReasoningContent != "" {
 			thinkingBuilder.WriteString(chunk.ReasoningContent)
-			toolEvents <- ToolEvent{
-				Type:    "thinking_delta",
-				Content: chunk.ReasoningContent,
-			}
+			toolEvents <- ToolEvent{Type: "thinking_delta", Content: chunk.ReasoningContent}
 		}
 		if chunk.Content != "" {
 			replyBuilder.WriteString(chunk.Content)
-			toolEvents <- ToolEvent{
-				Type:    "delta",
-				Content: chunk.Content,
-			}
+			toolEvents <- ToolEvent{Type: "delta", Content: chunk.Content}
 		}
 		for i, tc := range chunk.ToolCalls {
-			if i < len(toolCalls) {
-				toolCalls[i].Function.Arguments += tc.Function.Arguments
+			if i < len(result.toolCalls) {
+				result.toolCalls[i].Function.Arguments += tc.Function.Arguments
 				if tc.Function.Name != "" {
-					toolCalls[i].Function.Name = tc.Function.Name
+					result.toolCalls[i].Function.Name = tc.Function.Name
 				}
 				if tc.ID != "" {
-					toolCalls[i].ID = tc.ID
+					result.toolCalls[i].ID = tc.ID
 				}
 			} else {
-				toolCalls = append(toolCalls, tc)
+				result.toolCalls = append(result.toolCalls, tc)
 			}
 		}
 	}
-	return toolCalls, thinkingBuilder.String(), replyBuilder.String()
+	result.thinking = thinkingBuilder.String()
+	result.reply = replyBuilder.String()
+	return result
 }
+
+func outputLimitFinishReason(reason string) bool {
+	switch strings.ToLower(reason) {
+	case "length", "max_tokens", "max_output_tokens":
+		return true
+	default:
+		return false
+	}
+}
+
+const outputLimitMarker = "\n\n[回答因达到模型输出上限而截断]"
 
 func (s *AgentService) runLoop(
 	ctx context.Context,
@@ -177,25 +201,26 @@ func (s *AgentService) runLoop(
 	messages := mc.Messages
 	ctxState := mc.CtxState
 	toolModel := mc.ToolModel
-
+	scope := permission.ScopeKey(mc.SessionID, mc.ConversationID)
+	defer s.perms.ResetDenials(scope)
 	const maxToolRounds = 20
 	todoUncalledCount := 0
 	todoTools := 0
-	if mc.Mode != "aiops" {
-		for _, registered := range s.tools {
-			info, err := registered.Info(ctx)
-			if err != nil {
-				continue
-			}
-			switch info.Name {
-			case "read_todo":
-				todoTools |= 1
-			case "write_todo":
-				todoTools |= 2
-			}
-			if todoTools == 3 {
-				break
-			}
+
+	// 判断有没有read_todo和write_todo工具，如果都有则提醒用户使用
+	for _, registered := range s.tools {
+		info, err := registered.Info(ctx)
+		if err != nil {
+			continue
+		}
+		switch info.Name {
+		case "read_todo":
+			todoTools |= 1
+		case "write_todo":
+			todoTools |= 2
+		}
+		if todoTools == 3 {
+			break
 		}
 	}
 	remindTodo := todoTools == 3
@@ -205,8 +230,8 @@ func (s *AgentService) runLoop(
 			gen.Send(&adk.AgentEvent{Err: err})
 			return
 		}
-		// Pipeline already checked the initial messages. Recheck only after
-		// tool results have extended them, avoiding an immediate second summary.
+		// 管线已检查过初始消息。这里只在工具结果扩展消息后再检查，
+		// 避免紧接着重复触发一次摘要。
 		if turn > 0 {
 			level := contexttool.ShouldCompact(messages, ctxState)
 			if s.compactTrigger.IsTriggered() {
@@ -220,6 +245,7 @@ func (s *AgentService) runLoop(
 			}
 		}
 
+		// 最后一轮强制禁止工具调用，促使模型用文本收尾；其余轮次允许返回 tool_calls。
 		var stream *schema.StreamReader[*schema.Message]
 		var err error
 		if turn == maxToolRounds {
@@ -232,9 +258,31 @@ func (s *AgentService) runLoop(
 			return
 		}
 
-		// 读取 stream，统一处理 thinking 和 reply 内容
-		toolCalls, thinkingContent, replyContent := collectTurn(stream, toolEvents)
+		// 读取整轮流：增量推送给前端，同时累积文本、思考内容和工具调用分片。
+		turnResult := collectTurnWithMeta(stream, toolEvents)
 		stream.Close()
+
+		if turnResult.err != nil {
+			gen.Send(&adk.AgentEvent{Err: turnResult.err})
+			return
+		}
+		thinkingContent := turnResult.thinking
+		replyContent := turnResult.reply
+		toolCalls := turnResult.toolCalls
+
+		// 服务端因输出上限截断时，补一条可见标记并终止本轮；
+		// 此时不执行可能只收到一半的 tool_calls。
+		if outputLimitFinishReason(turnResult.finishReason) {
+			if replyContent != "" {
+				toolEvents <- ToolEvent{Type: "delta", Content: outputLimitMarker}
+				replyContent += outputLimitMarker
+			}
+			if thinkingContent != "" {
+				toolEvents <- ToolEvent{Type: "thinking_done"}
+			}
+			gen.Send(&adk.AgentEvent{Err: fmt.Errorf("模型达到最大输出限制")})
+			return
+		}
 
 		// 发送 thinking 结束信号
 		if thinkingContent != "" {
@@ -250,16 +298,18 @@ func (s *AgentService) runLoop(
 			log.Printf("[Turn %d] ToolCall[%d]: name=%s args=%s", turn, i, tc.Function.Name, tc.Function.Arguments)
 		}
 
+		// 没有工具调用说明模型已给出最终回答，结束循环。
 		if len(toolCalls) == 0 {
 			log.Printf("[Turn %d] 无 ToolCall，返回最终回答", turn)
 			return
 		}
+		// 最后一轮已被禁止使用工具，仍然返回 tool_calls 属于异常。
 		if turn == maxToolRounds {
 			gen.Send(&adk.AgentEvent{Err: fmt.Errorf("模型在工具轮数上限后仍返回工具调用")})
 			return
 		}
 
-		// todo 提醒（仅 chat 模式）
+		// todo 提醒（chat 与 aiops 均启用）
 		if remindTodo {
 			useTodo := false
 			for _, tc := range toolCalls {
@@ -300,19 +350,19 @@ func (s *AgentService) runLoop(
 				toolInput = map[string]any{}
 			}
 
-			decision := s.perms.Check(tc.Function.Name, toolInput)
+			decision := s.perms.Check(scope, tc.Function.Name, toolInput)
 			var result string
 			execute := false
 
 			switch decision.Behavior {
 			case permission.BehaviorDeny:
 				result = fmt.Sprintf("Permission denied: %s", decision.Reason)
-				s.perms.RecordDenial()
+				s.perms.RecordDenial(scope)
 				log.Printf("[Turn %d] 工具 %s 被拒绝: %s", turn, tc.Function.Name, decision.Reason)
 
 			case permission.BehaviorAsk:
 				reqID := uuid.New().String()
-				decisionCh := permission.WaitForDecision(reqID, mc.SessionID, mc.ConversationID, tc.Function.Name)
+				decisionCh := permission.WaitForDecision(reqID, mc.SessionID, mc.ConversationID, tc.Function.Name, toolInput)
 				toolEvents <- ToolEvent{
 					Type:      "permission_request",
 					Name:      tc.Function.Name,
@@ -323,11 +373,18 @@ func (s *AgentService) runLoop(
 				}
 
 				select {
-				case approved := <-decisionCh:
-					execute = approved
-					if !approved {
+				case response := <-decisionCh:
+					execute = response.Approved
+					if !response.Approved {
 						result = "Permission denied by user"
-						s.perms.RecordDenial()
+						s.perms.RecordDenial(scope)
+					} else if response.Always {
+						// 先安装规则再继续执行，后续同类调用无需再次确认。
+						ruleScope := scope
+						if response.Global {
+							ruleScope = ""
+						}
+						s.perms.AddRule(ruleScope, permission.RuleForInvocation(tc.Function.Name, toolInput))
 					}
 				case <-time.After(60 * time.Second):
 					result = "Permission request timed out"
@@ -342,19 +399,19 @@ func (s *AgentService) runLoop(
 			default:
 				result = "Permission denied: unsupported permission decision"
 			}
-
 			if execute {
 				var toolErr error
 				result, toolErr = s.executeTool(ctx, tc)
 				if toolErr != nil {
 					result = fmt.Sprintf("工具执行失败: %v", toolErr)
+				} else {
+					s.perms.ResetDenials(scope)
 				}
-				s.perms.ResetDenials()
 			}
 
-			if s.perms.ShouldConfirmPermissions() {
+			if s.perms.ShouldConfirmPermissions(scope) {
 				result += "\n\n[系统提醒] 工具调用已连续多次被拒绝。请停止重复尝试，向用户确认允许执行的范围，或仅基于已有信息回答。"
-				s.perms.ResetDenials()
+				s.perms.ResetDenials(scope)
 			}
 
 			if needReminder {

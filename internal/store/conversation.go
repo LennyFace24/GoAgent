@@ -3,16 +3,20 @@ package store
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
 	"time"
-	"log"
 
 	"github.com/cloudwego/eino/schema"
 	"github.com/google/uuid"
 )
+
+// ErrConversationNotFound 表示指定对话的元数据不存在。
+var ErrConversationNotFound = errors.New("conversation not found")
 
 type ConversationMeta struct {
 	ID        string `json:"id"`
@@ -27,16 +31,16 @@ type ConversationStore struct {
 }
 
 type messageLine struct {
-	Role       string `json:"role"`
-	Content    string `json:"content"`
+	Role       string         `json:"role"`
+	Content    string         `json:"content"`
 	ToolCalls  []toolCallLine `json:"tool_calls,omitempty"`
 	ToolCallID string         `json:"tool_call_id,omitempty"`
 	ToolName   string         `json:"tool_name,omitempty"`
 }
 
 type toolCallLine struct {
-	ID       string          `json:"id"`
-	Type     string          `json:"type"`
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
 	Function functionCallLine `json:"function"`
 }
 
@@ -104,7 +108,7 @@ func (s *ConversationStore) ListConversations(sessionID string) ([]*Conversation
 		return nil, fmt.Errorf("read session dir: %w", err)
 	}
 
-	var metas []*ConversationMeta
+	var metas = make([]*ConversationMeta, 0)
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
@@ -153,7 +157,7 @@ func (s *ConversationStore) LoadHistory(sessionID, conversationID string) ([]*sc
 		var line messageLine
 		if err := json.Unmarshal(scanner.Bytes(), &line); err != nil {
 			continue
-		};
+		}
 		switch line.Role {
 		case "user":
 			msgs = append(msgs, schema.UserMessage(line.Content))
@@ -228,6 +232,26 @@ func (s *ConversationStore) SaveMessages(sessionID, conversationID string, msgs 
 	}
 
 	return nil
+}
+
+// RenameConversation 更新指定对话的标题和更新时间。
+func (s *ConversationStore) RenameConversation(sessionID, conversationID, title string) (*ConversationMeta, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	meta, err := s.loadMeta(sessionID, conversationID)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, ErrConversationNotFound
+		}
+		return nil, fmt.Errorf("load conversation meta: %w", err)
+	}
+	meta.Title = title
+	meta.UpdatedAt = time.Now().Format(time.RFC3339)
+	if err := s.saveMeta(sessionID, meta); err != nil {
+		return nil, err
+	}
+	return meta, nil
 }
 
 // DeleteConversation 删除对话及其元数据

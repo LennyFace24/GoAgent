@@ -1,7 +1,7 @@
 // Package pipeline 实现消息预处理管线。
 //
 // 生产流程：SkillExpand → ModelPrep → ContextBuild → CompactCheck。
-// 命令由单独端点处理；EventBus 是尚未装配的扩展点。
+// 命令由单独端点处理；事件 Hook 层不实现，管线固定为这四个 Stage。
 // 管线只负责请求准备；AgentService.Stream 在其成功返回后启动独立 runLoop。
 package pipeline
 

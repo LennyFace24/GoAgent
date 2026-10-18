@@ -89,6 +89,15 @@ func doRequestWithCookie(r *gin.Engine, method, path, body, cookie string) *http
 	return w
 }
 
+// sessionCookie 从响应的 Set-Cookie 中提取 name=value，供后续请求复用同一 session。
+func sessionCookie(w *httptest.ResponseRecorder) string {
+	raw := w.Header().Get("Set-Cookie")
+	if i := strings.IndexByte(raw, ';'); i >= 0 {
+		return raw[:i]
+	}
+	return raw
+}
+
 // 路由表测试：所有端点 method+path 命中且不 404
 func TestRouteTable(t *testing.T) {
 	r := newTestRouter(t)
@@ -105,6 +114,7 @@ func TestRouteTable(t *testing.T) {
 		{http.MethodGet, "/api/conversations"},
 		{http.MethodPost, "/api/conversation"},
 		{http.MethodGet, "/api/conversation/default"},
+		{http.MethodPatch, "/api/conversation/default"},
 		{http.MethodDelete, "/api/conversation/default"},
 		{http.MethodPost, "/api/commands/execute"},
 		{http.MethodPost, "/api/upload_file"},
@@ -182,7 +192,7 @@ func TestGetModel(t *testing.T) {
 		t.Fatalf("GET /api/model → %d", w.Code)
 	}
 	var resp struct {
-		Models  []struct {
+		Models []struct {
 			ID string `json:"id"`
 		} `json:"models"`
 		Current string `json:"current"`
@@ -235,6 +245,10 @@ func TestConversationCRUD(t *testing.T) {
 	if w.Code != 200 {
 		t.Fatalf("POST /api/conversation → %d", w.Code)
 	}
+	cookie := sessionCookie(w)
+	if cookie == "" {
+		t.Fatal("POST /api/conversation did not return a session cookie")
+	}
 	var created struct {
 		Conversation struct {
 			ID string `json:"id"`
@@ -248,19 +262,68 @@ func TestConversationCRUD(t *testing.T) {
 		t.Fatal("conversation id 为空")
 	}
 
-	w = doRequest(r, http.MethodGet, "/api/conversations", "")
+	w = doRequestWithCookie(r, http.MethodGet, "/api/conversations", "", cookie)
 	if w.Code != 200 {
 		t.Fatalf("GET /api/conversations → %d", w.Code)
 	}
 
-	w = doRequest(r, http.MethodGet, "/api/conversation/"+id, "")
+	w = doRequestWithCookie(r, http.MethodGet, "/api/conversation/"+id, "", cookie)
 	if w.Code != 200 {
 		t.Fatalf("GET /api/conversation/%s → %d", id, w.Code)
 	}
 
-	w = doRequest(r, http.MethodDelete, "/api/conversation/"+id, "")
+	w = doRequestWithCookie(r, http.MethodPatch, "/api/conversation/"+id, `{"title":"改名后的对话"}`, cookie)
+	if w.Code != 200 {
+		t.Fatalf("PATCH /api/conversation/%s → %d: %s", id, w.Code, w.Body.String())
+	}
+	var renamed struct {
+		Conversation struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"conversation"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &renamed); err != nil {
+		t.Fatalf("unmarshal rename: %v", err)
+	}
+	if renamed.Conversation.ID != id || renamed.Conversation.Title != "改名后的对话" {
+		t.Fatalf("rename response = %#v", renamed.Conversation)
+	}
+
+	w = doRequestWithCookie(r, http.MethodGet, "/api/conversations", "", cookie)
+	var listed struct {
+		Conversations []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+		} `json:"conversations"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("unmarshal list: %v", err)
+	}
+	found := false
+	for _, conv := range listed.Conversations {
+		if conv.ID == id && conv.Title == "改名后的对话" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("renamed conversation missing from list: %#v", listed.Conversations)
+	}
+
+	if w = doRequestWithCookie(r, http.MethodPatch, "/api/conversation/"+id, `{"title":"   "}`, cookie); w.Code != 400 {
+		t.Fatalf("blank title → %d, want 400", w.Code)
+	}
+	if w = doRequestWithCookie(r, http.MethodPatch, "/api/conversation/missing", `{"title":"x"}`, cookie); w.Code != 404 {
+		t.Fatalf("missing conversation → %d, want 404", w.Code)
+	}
+
+	w = doRequestWithCookie(r, http.MethodDelete, "/api/conversation/"+id, "", cookie)
 	if w.Code != 200 {
 		t.Fatalf("DELETE /api/conversation/%s → %d", id, w.Code)
+	}
+
+	w = doRequestWithCookie(r, http.MethodGet, "/api/conversations", "", cookie)
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"conversations":[]`) {
+		t.Fatalf("empty conversation list should be an array: %d %s", w.Code, w.Body.String())
 	}
 }
 

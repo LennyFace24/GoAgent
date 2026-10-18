@@ -30,7 +30,7 @@ func NewHandlers(convStore *store.ConversationStore, agentService *service.Agent
 	return &Handlers{
 		Agent:        NewAgentHandler(agentService),
 		File:         NewFileHandler(fileService),
-		Conversation: NewConversationHandler(convStore),
+		Conversation: NewConversationHandler(convStore, agentService.PermissionManager()),
 		Command:      NewCommandHandler(convStore),
 		Metrics:      NewMetricsHandler(collector),
 	}
@@ -102,6 +102,7 @@ func SetupRoutesWith(r *gin.Engine, hs *Handlers) {
 		api.GET("/conversations", hs.Conversation.GetConversations)
 		api.POST("/conversation", hs.Conversation.CreateConversation)
 		api.GET("/conversation/:id", hs.Conversation.GetConversation)
+		api.PATCH("/conversation/:id", hs.Conversation.RenameConversation)
 		api.DELETE("/conversation/:id", hs.Conversation.DeleteConversation)
 
 		// 斜杠命令列表

@@ -17,7 +17,6 @@ GoAgent/
 │   │   └── registry_test.go       # 加载/校验/切换测试
 │   ├── pipeline/                  # ★ 消息预处理管线（新增）
 │   │   ├── pipeline.go            # MessageContext + Stage 接口 + Pipeline.Run
-│   │   ├── event_bus.go           # 预留的进程内同步 Hook 分发器，未接入请求链路
 │   │   ├── skill_expand_stage.go  # 阶段3：skill 触发词匹配注入
 │   │   ├── model_prep_stage.go    # 请求级模型与预算快照
 │   │   ├── compact_check_stage.go # 完整上下文预算检查与分级压缩
@@ -33,7 +32,7 @@ GoAgent/
 │   │   └── parser.go              # frontmatter 解析（支持折叠/字面块标量 >- |）
 │   ├── handler/                   # HTTP 控制层
 │   │   ├── routes.go              # ★ 依赖注入重构：Handlers + SetupRoutesWith
-│   │   ├── agent_handler.go       # Stream（SSE）+ PermissionResponse（always 生效）
+│   │   ├── agent_handler.go       # Stream（SSE）+ PermissionResponse（对话级/全局授权）
 │   │   ├── command_handler.go     # ★ /api/commands/execute（落库 user 原文 + assistant 结果）
 │   │   ├── conversation_handler.go# 会话 CRUD
 │   │   ├── file_handler.go        # 上传/检索
@@ -77,7 +76,7 @@ GoAgent/
 - `pl.Run(ctx, mc)` 顺序调用 Stage；ModelPrep 将本次请求的模型实例和预算写入 `mc`，ContextBuild 每次创建新的请求级 `ContextManager`，避免不同请求、模式和激活 Skill 共享可变 `slots`。
 - ContextBuild 先组装完整消息，CompactCheck 再对最终的 system + history + user 消息统一使用 `contexttool.EstimateTokens` 估算，执行微压缩或摘要压缩；不再用 `len/3` 与固定 Slot 开销混算。完整压缩使用无工具绑定的摘要模型并保留系统消息、近期历史和当前输入。
 - `cl100k_base` 和字符 fallback 都只是请求前估算；Provider 可能使用不同 tokenizer 或包含额外 Chat Template/Tool Schema 开销，因此通过模型配置的安全余量吸收误差，不宣称估算绝对精确。
-- 与原七步规划相比，EventTrigger、Hook 示例及配置启用、非错误 Skip 短路仍未完成；发送阶段明确留在 Stream，不保留空阶段。原计划保留独立 runLoop，不是把每轮工具执行改写为预处理阶段。
+- 与原七步规划相比，事件 Hook 层（EventBus/EventTrigger）不实现且相关占位代码已删除；非错误 Skip 短路仍未完成。发送阶段明确留在 Stream，不保留空阶段。原计划保留独立 runLoop，不是把每轮工具执行改写为预处理阶段。
 
 ## 3. 斜杠命令系统（对齐 omp 分层）
 
@@ -102,14 +101,14 @@ GoAgent/
 
 | 核心组件 | 位置 | 状态 |
 | :--- | :--- | :--- |
-| 消息预处理管线 | internal/pipeline/ | 4 个 Stage；请求级模型快照、Slot 组装与完整预算预检已接通，Hook/Skip 扩展仍未接入 |
+| 消息预处理管线 | internal/pipeline/ | 4 个 Stage；请求级模型快照、Slot 组装与完整预算预检已接通；事件 Hook 层不实现，非错误 Skip 短路未实现 |
 | 斜杠命令系统 | internal/commands/ | **已实现**（builtin/file-based/skill 分层） |
 | skill 来源 | internal/skills/ | **已实现**（~/.claude/skills + .agents/skills 扫描） |
 | **模型管理** | internal/modelmgr/ | **已实现**（model.json 运行时加载 + 每服务 ModelSet + 切换 API） |
 | 流式智能问答 | internal/service/agent_service.go | **已实现**（自定义工具循环 + SSE） |
 | 命令消息落库 | internal/handler/command_handler.go | **已实现**（user 原文 + assistant 结果） |
 | todo 工具 | internal/tools/extra_tool/todo_tool.go | **已注册启用**（write_todo/read_todo） |
-| permission always | internal/permission/ | **已实现**（AddRule + 持久化 permission.json） |
+| permission always | internal/permission/ | **已实现**（对话级内存规则 + 显式全局规则原子持久化到 permission.json） |
 | 后端路由测试 | internal/handler/routes_test.go | **已实现**（路由表 + 端点行为） |
 | 多智能体团队 (AgentTeam) | internal/tools/extra_tool/subproxy_tool.go | 已有真实子代理循环；未实现 Planner/Executor 团队调度 |
 | MCP 启动接入 | internal/mcp/ + internal/handler/routes.go | **已实现**（stdio/SSE/Streamable HTTP、发现、Eino 适配、权限与调用回填；非热加载） |
@@ -117,7 +116,7 @@ GoAgent/
 ## 6. 已知待办/限制
 
 - `~/.claude/commands` 的 file-based 命令依赖用户本机目录，CI/无此目录环境静默跳过。
-- EventBus 与 EventTriggerStage 保留为未接入的扩展代码：生产链路没有创建总线、注册 Hook，也未装配事件阶段；`pre_send`、`post_send` 目前仅有事件名声明。它不是 SSE 工具事件通道，未接入的原因不是 Windows 不支持 Go plugin。
+- 没有事件 Hook 层：EventBus、EventTriggerStage 及事件名声明已删除，生产管线固定为四个 Stage；不做插件注入。
 - MCP 配置与工具集合在启动阶段加载；没有文件监控或运行时重载入口，配置修改后需重启。
 - SubProxy 当前生产装配仍使用启动时默认模型，不承诺随模型选择器切换；主 Agent 的请求级快照不改变这个独立工具的配置来源。
 - chat 与 aiops 是实际模式；AIOps 提示词的 Plan/Replan 是回答流程指导，不是独立可切换的 plan 模式。连续拒绝只提醒确认权限范围。
@@ -130,6 +129,10 @@ GoAgent/
 请求经 SkillExpand、ModelPrep、ContextBuild、CompactCheck 后启动独立 runLoop，执行“模型流式输出 → ToolCall → 权限检查 → 工具执行 → ToolMessage 回填”。ContextManager 是请求级对象；模型、预算和最终消息也固定在本次 `mc` 中。批准与直接允许共用工具执行和错误处理分支。最多执行 20 个工具轮次，随后请求模型在禁用工具的条件下回答；若提供方仍返回 ToolCall，返回错误而不继续执行。首轮和最终回答都走相同的流式事件路径。
 
 上下文预算的所有请求前估算统一使用 `contexttool.EstimateTokens`：文本、ToolCall 名称、参数和每条消息开销走同一 tokenizer/fallback；Provider 的真实 usage 若可用只能作为请求后的观测校正，不替代发送前估算。
+
+权限检查顺序：Bash 严重规则 deny / 可疑规则 ask、全局与对话级 deny、全局与对话级 ask、AST 只读自动放行、对话级与全局 allow，最后默认 ask。`util.AnalyzeBashCommand` 是唯一只读权威，无法判定或 panic 都返回 Unknown（转人工确认）；`permission.Mode` 与未调用的 `bash_readonly.go` 已删除。持续授权按 `sessionID + conversationID` 隔离，显式全局授权才原子写入 `permission.json`，规则只匹配批准的 bash 命令文本或文件路径。
+
+模型流保留最后一个 `finish_reason`。为 `length`（输出上限）时，已生成正文照常推送，末尾追加 `[回答因达到模型输出上限而截断]`，返回明确失败并立即结束；截断轮产生的 ToolCall 不执行，也不自动续写。
 
 ### 7.2 MCP 接入
 

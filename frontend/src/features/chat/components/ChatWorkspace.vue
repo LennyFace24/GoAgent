@@ -331,7 +331,7 @@ const modeOptions: ModeOption[] = [
           <PermissionCard
             v-else-if="msg.role === 'permission_req'"
             :message="msg"
-            @respond="(approved: boolean, always: boolean) => respondPermission(msg, approved, always)"
+			@respond="(approved: boolean, always: boolean, global: boolean) => respondPermission(msg, approved, always, global)"
           />
         </div>
 

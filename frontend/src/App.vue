@@ -12,8 +12,9 @@ import MonitorDrawer from './features/tools/components/MonitorDrawer.vue'
 
 // 1. Cherry Studio 多层布局状态管理
 const activeNav = ref<string>('chat')
-const activeConversationId = ref<string>('default')
+const activeConversationId = ref<string>('')
 const dashboardView = ref<string>('overview')
+const { conversations } = useConversations()
 
 function onSelect(id: string): void {
   activeConversationId.value = id
@@ -23,17 +24,24 @@ function onCreated(id: string): void {
   activeConversationId.value = id
 }
 
+function onDeleted(id: string): void {
+  if (activeConversationId.value !== id) return
+  activeConversationId.value = conversations.value[0]?.id ?? ''
+}
+
 function onDashboardViewChange(view: string): void {
   dashboardView.value = view
 }
 
 onMounted(async () => {
   const { load, create } = useConversations()
-  const id = await create()
-  if (id) {
-    activeConversationId.value = id
-  }
   await load()
+  if (conversations.value.length === 0) {
+    const id = await create()
+    if (id) activeConversationId.value = id
+    return
+  }
+  activeConversationId.value = conversations.value[0].id
 })
 </script>
 
@@ -54,6 +62,7 @@ onMounted(async () => {
       :dashboardView="dashboardView"
       @select="onSelect"
       @created="onCreated"
+      @deleted="onDeleted"
       @dashboard-view="onDashboardViewChange"
     />
 

@@ -266,7 +266,7 @@ export function useChat(options: UseChatOptions) {
   }
 
   // 权限响应
-  async function respondPermission(msg: Message, approved: boolean, always = false) {
+  async function respondPermission(msg: Message, approved: boolean, always = false, global = false) {
     if (msg.role !== 'permission_req') return
     msg.responded = true
     msg.approved = approved
@@ -275,7 +275,7 @@ export function useChat(options: UseChatOptions) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ id: msg.requestId, conversation_id: conversationId.value, approved, always }),
+        body: JSON.stringify({ id: msg.requestId, conversation_id: conversationId.value, approved, always, global }),
       })
     } catch { /* ignore */ }
   }

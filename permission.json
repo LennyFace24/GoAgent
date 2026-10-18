@@ -49,7 +49,6 @@
       "Bash(git status*)",
       "Bash(git log*)",
       "Bash(git diff*)",
-      "Bash(git branch*)",
       "Bash(git show*)"
     ],
     "ask": [
@@ -87,7 +86,6 @@
       "Bash(:(){ :|:& };:)",
       "Bash(chmod -R 777 *)",
       "Bash(chown -R *)"
-    ],
-    "defaultMode": "ask"
+    ]
   }
 }

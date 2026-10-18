@@ -46,7 +46,6 @@ func (s *ContextBuildStage) Process(ctx context.Context, mc *MessageContext) err
 		cm.AppendSlot("skill_active", strings.TrimSpace(mc.Skill.Body), 4)
 	}
 
-	// Assemble slots before CompactCheck so system and current input count toward the budget.
 	mc.Messages = cm.BuildMessages(mc.History, mc.Raw)
 	log.Printf("pipeline: 组装完成，共 %d 条消息", len(mc.Messages))
 	return nil

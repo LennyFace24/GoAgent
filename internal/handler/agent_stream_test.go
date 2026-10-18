@@ -195,7 +195,7 @@ func TestStoppedReplyIsSavedAndIncludedInNextRequest(t *testing.T) {
 				t.Fatal(err)
 			}
 			agent := service.NewAgentService(registered, conversations, registry)
-			agent.PermissionManager().AddRule(permission.Rule{Tool: "context_status", Behavior: permission.BehaviorDeny})
+			agent.PermissionManager().AddRule("", permission.Rule{Tool: "context_status", Behavior: permission.BehaviorDeny})
 			handler := NewAgentHandler(agent)
 			router := gin.New()
 			router.Use(sessions.Sessions("goagent_session", cookie.NewStore([]byte("isolated-stopped-reply-test"))), middleware.SessionIDMiddleware())

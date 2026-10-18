@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -124,6 +125,31 @@ func TestListConversationsReturnsAllCreated(t *testing.T) {
 	}
 	if !got[m1.ID] || !got[m2.ID] {
 		t.Fatalf("list 缺少创建的会话: got=%v want %s,%s", got, m1.ID, m2.ID)
+	}
+}
+
+func TestRenameConversationUpdatesTitleAndTimestamp(t *testing.T) {
+	s := newTestStore(t)
+	const sessionID = "sess"
+	meta, err := s.CreateConversation(sessionID, "旧名称")
+	if err != nil {
+		t.Fatalf("CreateConversation: %v", err)
+	}
+	renamed, err := s.RenameConversation(sessionID, meta.ID, "新名称")
+	if err != nil {
+		t.Fatalf("RenameConversation: %v", err)
+	}
+	if renamed.Title != "新名称" || renamed.UpdatedAt == "" {
+		t.Fatalf("rename did not update title: %#v", renamed)
+	}
+
+	loaded, err := s.ListConversations(sessionID)
+	if err != nil || len(loaded) != 1 || loaded[0].Title != "新名称" {
+		t.Fatalf("renamed title not persisted: %#v (%v)", loaded, err)
+	}
+
+	if _, err := s.RenameConversation(sessionID, "missing", "x"); !errors.Is(err, ErrConversationNotFound) {
+		t.Fatalf("missing conversation error = %v, want ErrConversationNotFound", err)
 	}
 }
 

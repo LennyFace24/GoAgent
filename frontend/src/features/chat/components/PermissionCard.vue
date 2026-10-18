@@ -4,7 +4,7 @@ import type { PermissionMessage } from '../../../shared/types'
 
 const props = defineProps<{ message: PermissionMessage }>()
 const emit = defineEmits<{
-  respond: [approved: boolean, always: boolean]
+	respond: [approved: boolean, always: boolean, global: boolean]
 }>()
 
 function summarizeArgs(args?: string): string {
@@ -31,17 +31,21 @@ function summarizeArgs(args?: string): string {
     <div class="perm-reason" v-if="message.reason">{{ message.reason }}</div>
     <div class="perm-args" v-if="message.args">{{ summarizeArgs(message.args) }}</div>
     <div v-if="!message.responded" class="perm-actions">
-      <button class="perm-btn deny" @click="emit('respond', false, false)">
+      <button class="perm-btn deny" @click="emit('respond', false, false, false)">
         <X :size="13" :stroke-width="2.2" />
         <span>拒绝</span>
       </button>
-      <button class="perm-btn allow" @click="emit('respond', true, false)">
+      <button class="perm-btn allow" @click="emit('respond', true, false, false)">
         <Check :size="13" :stroke-width="2.4" />
         <span>允许</span>
       </button>
-      <button class="perm-btn always" @click="emit('respond', true, true)">
+      <button class="perm-btn always" @click="emit('respond', true, true, false)">
         <Check :size="13" :stroke-width="2.4" />
-        <span>始终允许</span>
+        <span>本对话始终允许</span>
+      </button>
+      <button class="perm-btn global" @click="emit('respond', true, true, true)">
+        <Check :size="13" :stroke-width="2.4" />
+        <span>所有对话允许</span>
       </button>
     </div>
     <div v-else class="perm-result" :class="{ approved: message.approved }">
@@ -147,7 +151,6 @@ function summarizeArgs(args?: string): string {
   transform: translateY(-2px);
   box-shadow: 0 4px 18px var(--accent-glow);
 }
-
 .perm-btn.always {
   color: var(--accent-bright);
   border-color: var(--border-focus);
@@ -155,6 +158,17 @@ function summarizeArgs(args?: string): string {
 
 .perm-btn.always:hover {
   background: var(--accent-soft);
+  transform: translateY(-1px);
+}
+
+.perm-btn.global {
+  color: var(--text-muted);
+  border-color: var(--border-input);
+}
+
+.perm-btn.global:hover {
+  color: var(--accent-bright);
+  border-color: var(--border-focus);
   transform: translateY(-1px);
 }
 

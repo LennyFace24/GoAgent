@@ -168,6 +168,7 @@ func (h *AgentHandler) PermissionResponse(c *gin.Context) {
 		ConversationID string `json:"conversation_id"`
 		Approved       bool   `json:"approved"`
 		Always         bool   `json:"always"`
+		Global         bool   `json:"global"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, gin.H{"error": err.Error()})
@@ -190,19 +191,19 @@ func (h *AgentHandler) PermissionResponse(c *gin.Context) {
 		conversationID = "default"
 	}
 
-	handled, toolName := permission.HandleResponse(req.ID, sessionID, conversationID, req.Approved)
+	handled, approval := permission.HandleResponse(req.ID, sessionID, conversationID, req.Approved, req.Always, req.Global)
 	if !handled {
 		c.JSON(404, gin.H{"error": "permission request not found"})
 		return
 	}
 
-	if req.Always && req.Approved && toolName != "" {
-		// "始终允许"：写入内存规则 + 持久化到 permission.json
-		h.service.PermissionManager().AddRule(permission.Rule{Tool: toolName, Behavior: permission.BehaviorAllow})
-		if err := permission.PersistAlwaysAllow("permission.json", toolName); err != nil {
+	// 当前对话范围的规则由工具循环在拿到答复后安装；这里只负责全局规则的落盘。
+	if req.Always && req.Approved && req.Global {
+		rule := permission.RuleForInvocation(approval.ToolName, approval.ToolInput)
+		if err := permission.PersistAlwaysAllow("permission.json", rule); err != nil {
 			log.Printf("PermissionResponse: 持久化 always 规则失败 %v", err)
 		} else {
-			log.Printf("PermissionResponse: 用户选择始终允许 tool=%s", toolName)
+			log.Printf("PermissionResponse: 用户选择全局始终允许 tool=%s", approval.ToolName)
 		}
 	}
 

@@ -77,7 +77,7 @@ func lifecycleService(t *testing.T, endpoint string, registered []tool.BaseTool,
 	}
 	return &AgentService{
 		store: conversations, models: modelmgr.NewModelSet(registry, registered), tools: registered,
-		compactTrigger: &contexttool.CompactTrigger{}, perms: permission.NewPermissionManager(permission.ModeDefault),
+		compactTrigger: &contexttool.CompactTrigger{}, perms: permission.NewPermissionManager(),
 		skillReg: skills.NewSkillRegistry(),
 	}
 }
@@ -306,7 +306,7 @@ func TestRepeatedDenialsDoNotAdvertisePlanMode(t *testing.T) {
 		t.Fatal(err)
 	}
 	svc := lifecycleService(t, provider.URL, []tool.BaseTool{inspect}, 20000)
-	svc.perms.AddRule(permission.Rule{Tool: "inspect", Behavior: permission.BehaviorDeny})
+	svc.perms.AddRule("", permission.Rule{Tool: "inspect", Behavior: permission.BehaviorDeny})
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	iterator, events, err := svc.Stream(ctx, "chat", "session", "conversation", "Inspect")
@@ -373,6 +373,79 @@ func TestTodoReminderUsesRegisteredFileTools(t *testing.T) {
 	text, err := reader.InvokableRun(ctx, `{"path":"todo.md"}`)
 	if err != nil || !strings.Contains(text, "pending: inspect") {
 		t.Fatalf("registered todo tools did not persist/reload task: %q %v", text, err)
+	}
+}
+
+func TestOutputLimitKeepsPartialReplyAndSkipsToolExecution(t *testing.T) {
+	var requests atomic.Int32
+	var executions atomic.Int32
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		w.Header().Set("Content-Type", "text/event-stream")
+		chunk := map[string]any{
+			"id": "limit", "object": "chat.completion.chunk", "created": 1,
+			"choices": []any{map[string]any{
+				"index": 0,
+				"delta": map[string]any{
+					"content": "partial answer",
+					"tool_calls": []any{map[string]any{
+						"index": 0, "id": "truncated-call", "type": "function",
+						"function": map[string]any{"name": "inspect", "arguments": "{}"},
+					}},
+				},
+				"finish_reason": "length",
+			}},
+		}
+		data, _ := json.Marshal(chunk)
+		_, _ = fmt.Fprintf(w, "data: %s\n\ndata: [DONE]\n\n", data)
+	}))
+	defer provider.Close()
+
+	inspect, err := utils.InferTool("inspect", "Inspect", func(context.Context, struct{}) (string, error) {
+		executions.Add(1)
+		return "must not execute", nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc := lifecycleService(t, provider.URL, []tool.BaseTool{inspect}, 20000)
+	svc.perms.AddRule("", permission.Rule{Tool: "inspect", Behavior: permission.BehaviorAllow})
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	iterator, events, err := svc.Stream(ctx, "chat", "session", "conversation", "Inspect")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var agentErr error
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for event, ok := iterator.Next(); ok; event, ok = iterator.Next() {
+			if event.Err != nil {
+				agentErr = event.Err
+			}
+		}
+	}()
+	var reply strings.Builder
+	for event := range events {
+		if event.Type == "delta" {
+			reply.WriteString(event.Content)
+		}
+	}
+	<-done
+
+	if executions.Load() != 0 {
+		t.Fatalf("truncated ToolCall was executed: %d", executions.Load())
+	}
+	if requests.Load() != 1 {
+		t.Fatalf("output limit should stop after one model call, got %d", requests.Load())
+	}
+	if agentErr == nil || !strings.Contains(agentErr.Error(), "最大输出限制") {
+		t.Fatalf("output limit was not reported: %v", agentErr)
+	}
+	if !strings.Contains(reply.String(), "partial answer") || !strings.Contains(reply.String(), outputLimitMarker) {
+		t.Fatalf("partial reply or marker missing: %q", reply.String())
 	}
 }
 

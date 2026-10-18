@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/cloudwego/eino/schema"
@@ -18,6 +19,19 @@ func sendStream(msgs ...*schema.Message) *schema.StreamReader[*schema.Message] {
 	return sr
 }
 
+// sendStreamWithError 在发送给定消息后追加一个流错误，用于验证错误传播。
+func sendStreamWithError(err error, msgs ...*schema.Message) *schema.StreamReader[*schema.Message] {
+	sr, sw := schema.Pipe[*schema.Message](len(msgs) + 1)
+	go func() {
+		defer sw.Close()
+		for _, m := range msgs {
+			sw.Send(m, nil)
+		}
+		sw.Send(nil, err)
+	}()
+	return sr
+}
+
 func TestCollectTurnAggregatesReply(t *testing.T) {
 	stream := sendStream(
 		&schema.Message{Role: schema.Assistant, Content: "Hello"},
@@ -25,16 +39,19 @@ func TestCollectTurnAggregatesReply(t *testing.T) {
 	)
 	ch := make(chan ToolEvent, 16)
 
-	toolCalls, thinking, reply := collectTurn(stream, ch)
+	result := collectTurnWithMeta(stream, ch)
 
-	if len(toolCalls) != 0 {
-		t.Fatalf("toolCalls = %d, want 0", len(toolCalls))
+	if result.err != nil {
+		t.Fatalf("unexpected stream error: %v", result.err)
 	}
-	if thinking != "" {
-		t.Fatalf("thinking = %q, want empty", thinking)
+	if len(result.toolCalls) != 0 {
+		t.Fatalf("toolCalls = %d, want 0", len(result.toolCalls))
 	}
-	if reply != "Hello world" {
-		t.Fatalf("reply = %q, want %q", reply, "Hello world")
+	if result.thinking != "" {
+		t.Fatalf("thinking = %q, want empty", result.thinking)
+	}
+	if result.reply != "Hello world" {
+		t.Fatalf("reply = %q, want %q", result.reply, "Hello world")
 	}
 }
 
@@ -63,12 +80,12 @@ func TestCollectTurnMergesSplitToolCall(t *testing.T) {
 	)
 	ch := make(chan ToolEvent, 16)
 
-	toolCalls, _, _ := collectTurn(stream, ch)
+	result := collectTurnWithMeta(stream, ch)
 
-	if len(toolCalls) != 1 {
-		t.Fatalf("toolCalls = %d, want 1 (分片应合并为单个 tool_call)", len(toolCalls))
+	if len(result.toolCalls) != 1 {
+		t.Fatalf("toolCalls = %d, want 1 (分片应合并为单个 tool_call)", len(result.toolCalls))
 	}
-	tc := toolCalls[0]
+	tc := result.toolCalls[0]
 	if tc.ID != "t1" {
 		t.Fatalf("ID = %q, want t1", tc.ID)
 	}
@@ -88,17 +105,17 @@ func TestCollectTurnEmitsDeltaAndThinkingEvents(t *testing.T) {
 	)
 	ch := make(chan ToolEvent, 16)
 
-	toolCalls, thinking, reply := collectTurn(stream, ch)
+	result := collectTurnWithMeta(stream, ch)
 	close(ch)
 
-	if len(toolCalls) != 0 {
-		t.Fatalf("toolCalls = %d, want 0", len(toolCalls))
+	if len(result.toolCalls) != 0 {
+		t.Fatalf("toolCalls = %d, want 0", len(result.toolCalls))
 	}
-	if thinking != "想一下" {
-		t.Fatalf("thinking = %q, want %q", thinking, "想一下")
+	if result.thinking != "想一下" {
+		t.Fatalf("thinking = %q, want %q", result.thinking, "想一下")
 	}
-	if reply != "答" {
-		t.Fatalf("reply = %q, want %q", reply, "答")
+	if result.reply != "答" {
+		t.Fatalf("reply = %q, want %q", result.reply, "答")
 	}
 
 	// 校验推送到 toolEvents 的事件类型与顺序
@@ -121,9 +138,40 @@ func TestCollectTurnEmptyStream(t *testing.T) {
 	stream := sendStream() // 立即关闭
 	ch := make(chan ToolEvent, 4)
 
-	toolCalls, thinking, reply := collectTurn(stream, ch)
+	result := collectTurnWithMeta(stream, ch)
 
-	if len(toolCalls) != 0 || thinking != "" || reply != "" {
-		t.Fatalf("expected all empty, got toolCalls=%d thinking=%q reply=%q", len(toolCalls), thinking, reply)
+	if result.err != nil || len(result.toolCalls) != 0 || result.thinking != "" || result.reply != "" {
+		t.Fatalf("expected all empty, got err=%v toolCalls=%d thinking=%q reply=%q",
+			result.err, len(result.toolCalls), result.thinking, result.reply)
+	}
+}
+
+func TestCollectTurnRecordsFinishReason(t *testing.T) {
+	stream := sendStream(&schema.Message{
+		Role:         schema.Assistant,
+		Content:      "partial",
+		ResponseMeta: &schema.ResponseMeta{FinishReason: "length"},
+	})
+	ch := make(chan ToolEvent, 8)
+
+	result := collectTurnWithMeta(stream, ch)
+
+	if result.reply != "partial" || result.finishReason != "length" {
+		t.Fatalf("finish reason lost: reply=%q reason=%q", result.reply, result.finishReason)
+	}
+}
+
+func TestCollectTurnPropagatesStreamError(t *testing.T) {
+	streamErr := errors.New("stream broke")
+	stream := sendStreamWithError(streamErr, &schema.Message{Role: schema.Assistant, Content: "partial"})
+	ch := make(chan ToolEvent, 8)
+
+	result := collectTurnWithMeta(stream, ch)
+
+	if !errors.Is(result.err, streamErr) {
+		t.Fatalf("stream error not propagated: %v", result.err)
+	}
+	if result.reply != "partial" {
+		t.Fatalf("partial content lost on stream error: %q", result.reply)
 	}
 }

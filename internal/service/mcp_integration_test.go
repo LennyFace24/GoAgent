@@ -99,8 +99,8 @@ func TestMCPApprovalPreservesProtocolFailure(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			perms := permission.NewPermissionManager(permission.ModeDefault)
-			perms.AddRule(permission.Rule{Tool: toolName, Behavior: permission.BehaviorAsk})
+			perms := permission.NewPermissionManager()
+			perms.AddRule("", permission.Rule{Tool: toolName, Behavior: permission.BehaviorAsk})
 			svc := &AgentService{models: modelmgr.NewModelSet(registry, remoteTools), tools: remoteTools, perms: perms, compactTrigger: &contexttool.CompactTrigger{}}
 			iterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
 			agentDone := make(chan struct{})
@@ -137,7 +137,7 @@ func TestMCPApprovalPreservesProtocolFailure(t *testing.T) {
 						if calls.Load() != 0 {
 							t.Error("MCP call ran before approval")
 						}
-						if handled, _ := permission.HandleResponse(event.RequestID, "approval-session", "approval-conversation", approved); !handled {
+						if handled, _ := permission.HandleResponse(event.RequestID, "approval-session", "approval-conversation", approved, false, false); !handled {
 							t.Error("permission request was published before its waiter was registered")
 						}
 					}

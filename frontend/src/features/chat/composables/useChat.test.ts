@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ref } from 'vue'
 import { useChat } from '../composables/useChat'
+import type { PermissionMessage } from '../../../shared/types'
 
 // 把 SSE 文本块编码为 Uint8Array
 function enc(s: string): Uint8Array {
@@ -141,6 +142,59 @@ describe('useChat 停止标记', () => {
     expect(last.role).toBe('assistant')
     expect(last.content).toContain('partial')
     expect(last.streaming).toBe(false)
+  })
+})
+
+describe('useChat 权限响应', () => {
+  it('审批请求携带 always/global 作用域选项', async () => {
+    const s = makeStepStream()
+    const fetchMock = vi.fn(async (url: string) => {
+      if (typeof url === 'string' && url.startsWith('/api/conversation/')) {
+        return new Response(JSON.stringify({ messages: [] }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url === '/api/permission/response') {
+        return new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(s.stream, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+    })
+    globalThis.fetch = fetchMock as unknown as typeof fetch
+    const { chat } = setupChat('A')
+    await flush()
+
+    const sendPromise = chat.send('hi')
+    await flush()
+
+    const toolEvent = {
+      type: 'permission_request',
+      name: 'bash',
+      args: '{"command":"ls"}',
+      request_id: 'req-1',
+    }
+    s.emit(`event: tool\ndata: ${JSON.stringify(toolEvent)}\n\n`)
+    await flush()
+
+    const permission = chat.messages.value.find(
+      (m): m is PermissionMessage => m.role === 'permission_req',
+    )
+    if (!permission) {
+      throw new Error('permission request was not routed to the conversation buffer')
+    }
+
+    await chat.respondPermission(permission, true, true, true)
+    const call = fetchMock.mock.calls.find(([url]) => url === '/api/permission/response')
+    expect(call).toBeTruthy()
+    const body = JSON.parse(String(call?.[1]?.body))
+    expect(body).toMatchObject({ id: 'req-1', approved: true, always: true, global: true })
+
+    s.emit('data: "done"\n\n')
+    s.close()
+    await sendPromise
   })
 })
 

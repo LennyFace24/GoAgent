@@ -5,18 +5,14 @@ import (
 	"fmt"
 	"log"
 	"os"
+	pathpkg "path"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 
 	basictool "github.com/LennyFace24/MiniAgent/internal/tools/basic_tool"
 	"github.com/LennyFace24/MiniAgent/internal/util"
-)
-
-type Mode string
-
-const (
-	ModeDefault Mode = "default" // 未命中规则时询问用户
 )
 
 type Behavior string
@@ -41,16 +37,17 @@ type Decision struct {
 
 type PermissionManager struct {
 	mu                    sync.RWMutex
-	mode                  Mode
 	rules                 []Rule
-	consecutiveDenials    int
+	scopedRules           map[string][]Rule
+	consecutiveDenials    map[string]int
 	maxConsecutiveDenials int
 }
 
-func NewPermissionManager(mode Mode) *PermissionManager {
+func NewPermissionManager() *PermissionManager {
 	return &PermissionManager{
-		mode:                  mode,
 		rules:                 loadPermissionConfig("permission.json"),
+		scopedRules:           make(map[string][]Rule),
+		consecutiveDenials:    make(map[string]int),
 		maxConsecutiveDenials: 3,
 	}
 }
@@ -60,17 +57,21 @@ type permissionFile struct {
 }
 
 type permissionRules struct {
-	Allow       []string `json:"allow"`
-	Ask         []string `json:"ask"`
-	Deny        []string `json:"deny"`
-	DefaultMode string   `json:"defaultMode"`
+	Allow []string `json:"allow"`
+	Ask   []string `json:"ask"`
+	Deny  []string `json:"deny"`
+}
+
+var persistMu sync.Mutex
+
+// ScopeKey creates the in-memory scope used for one conversation.
+func ScopeKey(sessionID, conversationID string) string {
+	return sessionID + "\x00" + conversationID
 }
 
 func loadPermissionConfig(path string) []Rule {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		// 权限配置缺失时降级为空规则（交由默认 ask 行为兜底），不 panic，
-		// 避免 NewPermissionManager 在测试或无配置环境下不可用。
 		if !os.IsNotExist(err) {
 			log.Printf("读取权限配置失败: %v", err)
 		}
@@ -92,118 +93,170 @@ func loadPermissionConfig(path string) []Rule {
 
 func appendRules(rules []Rule, patterns []string, behavior Behavior) []Rule {
 	for _, pattern := range patterns {
-		tool, content := parseToolPattern(pattern)
-		rules = append(rules, Rule{Tool: tool, Content: content, Behavior: behavior})
+		toolName, pathPattern, content := parseToolPattern(pattern)
+		rules = append(rules, Rule{Tool: toolName, Path: pathPattern, Content: content, Behavior: behavior})
 	}
 	return rules
 }
 
-func parseToolPattern(pattern string) (string, string) {
+func parseToolPattern(pattern string) (toolName, pathPattern, content string) {
 	if strings.HasPrefix(pattern, "Bash(") && strings.HasSuffix(pattern, ")") {
-		return "bash", strings.TrimSuffix(strings.TrimPrefix(pattern, "Bash("), ")")
+		return "bash", "", strings.TrimSuffix(strings.TrimPrefix(pattern, "Bash("), ")")
 	}
-	return pattern, ""
+	if open := strings.IndexByte(pattern, '('); open > 0 && strings.HasSuffix(pattern, ")") {
+		return pattern[:open], strings.TrimSuffix(pattern[open+1:], ")"), ""
+	}
+	return pattern, "", ""
 }
 
-func (pm *PermissionManager) Check(toolName string, toolInput map[string]any) Decision {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
+// RuleForInvocation creates a least-privilege allow rule for one approved call.
+func RuleForInvocation(toolName string, toolInput map[string]any) Rule {
+	rule := Rule{Tool: toolName, Behavior: BehaviorAllow}
+	if toolName == "bash" {
+		rule.Content, _ = toolInput["command"].(string)
+		return rule
+	}
+	if path, ok := toolInput["path"].(string); ok && path != "" {
+		rule.Path = filepath.ToSlash(filepath.Clean(path))
+	}
+	return rule
+}
 
+func (pm *PermissionManager) Check(scope, toolName string, toolInput map[string]any) Decision {
 	if decision, ok := pm.validateBash(toolName, toolInput); ok {
 		return decision
 	}
-	if decision, ok := pm.matchRule(toolName, toolInput, BehaviorDeny); ok {
+
+	pm.mu.RLock()
+	global := pm.rules
+	scoped := pm.scopedRules[scope]
+	if decision, ok := matchRules(global, scoped, toolName, toolInput, BehaviorDeny); ok {
+		pm.mu.RUnlock()
 		return decision
 	}
-	if decision, ok := pm.matchRule(toolName, toolInput, BehaviorAsk); ok {
+	if decision, ok := matchRules(global, scoped, toolName, toolInput, BehaviorAsk); ok {
+		pm.mu.RUnlock()
 		return decision
 	}
+	pm.mu.RUnlock()
+
 	if decision, ok := pm.allowReadOnlyBash(toolName, toolInput); ok {
 		return decision
 	}
-	if decision, ok := pm.matchRule(toolName, toolInput, BehaviorAllow); ok {
+
+	pm.mu.RLock()
+	if decision, ok := matchRules(scoped, global, toolName, toolInput, BehaviorAllow); ok {
+		pm.mu.RUnlock()
 		return decision
 	}
+	pm.mu.RUnlock()
 
-	return Decision{
-		Behavior: BehaviorAsk,
-		Reason:   fmt.Sprintf("无规则匹配 %s，需要用户确认", toolName),
+	return Decision{Behavior: BehaviorAsk, Reason: fmt.Sprintf("无规则匹配 %s，需要用户确认", toolName)}
+}
+
+func matchRules(primary, secondary []Rule, toolName string, toolInput map[string]any, behavior Behavior) (Decision, bool) {
+	for _, rules := range [][]Rule{primary, secondary} {
+		for _, rule := range rules {
+			if rule.Behavior != behavior || !matches(rule, toolName, toolInput) {
+				continue
+			}
+			return Decision{Behavior: behavior, Reason: fmt.Sprintf("命中%s规则: tool=%s", behavior, rule.Tool)}, true
+		}
 	}
+	return Decision{}, false
 }
 
 func (pm *PermissionManager) validateBash(toolName string, toolInput map[string]any) (Decision, bool) {
 	if toolName != "bash" {
 		return Decision{}, false
 	}
-
 	cmd, _ := toolInput["command"].(string)
 	vr := basictool.ValidateBash(cmd)
 	if len(vr.Failures) == 0 {
 		return Decision{}, false
 	}
 	if vr.Severe {
-		return Decision{
-			Behavior: BehaviorDeny,
-			Reason:   fmt.Sprintf("Bash 安全校验拦截: %v", vr.Failures),
-		}, true
+		return Decision{Behavior: BehaviorDeny, Reason: fmt.Sprintf("Bash 安全校验拦截: %v", vr.Failures)}, true
 	}
-	return Decision{
-		Behavior: BehaviorAsk,
-		Reason:   fmt.Sprintf("Bash 安全校验标记: %v", vr.Failures),
-	}, true
+	return Decision{Behavior: BehaviorAsk, Reason: fmt.Sprintf("Bash 安全校验标记: %v", vr.Failures)}, true
 }
 
 func (pm *PermissionManager) allowReadOnlyBash(toolName string, toolInput map[string]any) (Decision, bool) {
 	if toolName != "bash" {
 		return Decision{}, false
 	}
-
 	cmd, _ := toolInput["command"].(string)
 	if util.AnalyzeBashCommand(cmd) != util.BashAccessRead {
 		return Decision{}, false
 	}
-
-	return Decision{
-		Behavior: BehaviorAllow,
-		Reason:   "AST 分析: 只读命令，自动放行",
-	}, true
+	return Decision{Behavior: BehaviorAllow, Reason: "AST 分析: 只读命令，自动放行"}, true
 }
 
-func (pm *PermissionManager) matchRule(toolName string, toolInput map[string]any, behavior Behavior) (Decision, bool) {
-	for _, rule := range pm.rules {
-		if rule.Behavior != behavior || !pm.matches(rule, toolName, toolInput) {
-			continue
-		}
-		return Decision{
-			Behavior: behavior,
-			Reason:   fmt.Sprintf("命中%s规则: tool=%s", behavior, rule.Tool),
-		}, true
-	}
-	return Decision{}, false
-}
-
-func (pm *PermissionManager) matches(rule Rule, toolName string, toolInput map[string]any) bool {
+func matches(rule Rule, toolName string, toolInput map[string]any) bool {
 	if rule.Tool != "*" && rule.Tool != toolName {
 		return false
 	}
 	if rule.Path != "" && rule.Path != "*" {
 		path, _ := toolInput["path"].(string)
-		if matched, _ := filepath.Match(rule.Path, path); !matched {
+		if !matchPath(rule.Path, path) {
 			return false
 		}
 	}
 	if rule.Content != "" && rule.Content != "*" {
 		cmd, _ := toolInput["command"].(string)
-		return matchContent(rule.Content, cmd)
+		if !matchContent(rule.Content, cmd) {
+			return false
+		}
 	}
 	return true
+}
+
+func matchPath(pattern, value string) bool {
+	pattern = filepath.ToSlash(filepath.Clean(pattern))
+	value = filepath.ToSlash(filepath.Clean(value))
+	if strings.Contains(pattern, "**") {
+		matched, err := regexp.MatchString(globRegex(pattern), value)
+		return err == nil && matched
+	}
+	matched, err := pathpkg.Match(pattern, value)
+	return err == nil && matched
+}
+
+func globRegex(pattern string) string {
+	var b strings.Builder
+	b.WriteByte('^')
+	for i := 0; i < len(pattern); {
+		switch pattern[i] {
+		case '*':
+			if i+1 < len(pattern) && pattern[i+1] == '*' {
+				i += 2
+				if i < len(pattern) && pattern[i] == '/' {
+					i++
+					b.WriteString(`(?:.*/)?`)
+				} else {
+					b.WriteString(`.*`)
+				}
+			} else {
+				i++
+				b.WriteString(`[^/]*`)
+			}
+		case '?':
+			i++
+			b.WriteString(`[^/]`)
+		default:
+			b.WriteString(regexp.QuoteMeta(string(pattern[i])))
+			i++
+		}
+	}
+	b.WriteByte('$')
+	return b.String()
 }
 
 func matchContent(pattern, value string) bool {
 	if value == pattern {
 		return true
 	}
-	if matched, _ := filepath.Match(pattern, value); matched {
+	if matched, _ := pathpkg.Match(pattern, value); matched {
 		return true
 	}
 	if strings.HasSuffix(pattern, " *") {
@@ -213,74 +266,116 @@ func matchContent(pattern, value string) bool {
 	return false
 }
 
-func (pm *PermissionManager) RecordDenial() {
+func (pm *PermissionManager) RecordDenial(scope string) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	pm.consecutiveDenials++
+	pm.consecutiveDenials[scope]++
 }
 
-func (pm *PermissionManager) ResetDenials() {
+func (pm *PermissionManager) ResetDenials(scope string) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	pm.consecutiveDenials = 0
+	delete(pm.consecutiveDenials, scope)
 }
 
-func (pm *PermissionManager) ConsecutiveDenials() int {
+func (pm *PermissionManager) ConsecutiveDenials(scope string) int {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
-	return pm.consecutiveDenials
+	return pm.consecutiveDenials[scope]
 }
 
-func (pm *PermissionManager) ShouldConfirmPermissions() bool {
+func (pm *PermissionManager) ShouldConfirmPermissions(scope string) bool {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
-	return pm.consecutiveDenials >= pm.maxConsecutiveDenials
+	return pm.consecutiveDenials[scope] >= pm.maxConsecutiveDenials
 }
 
-func (pm *PermissionManager) AddRule(rule Rule) {
+func (pm *PermissionManager) AddRule(scope string, rule Rule) {
 	pm.mu.Lock()
 	defer pm.mu.Unlock()
-	pm.rules = append(pm.rules, rule)
+	if scope == "" {
+		pm.rules = append(pm.rules, rule)
+		return
+	}
+	pm.scopedRules[scope] = append(pm.scopedRules[scope], rule)
 }
 
-func (pm *PermissionManager) GetMode() Mode {
-	pm.mu.RLock()
-	defer pm.mu.RUnlock()
-	return pm.mode
+func (pm *PermissionManager) ClearScope(scope string) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	delete(pm.scopedRules, scope)
+	delete(pm.consecutiveDenials, scope)
 }
 
 func (pm *PermissionManager) GetRules() []Rule {
 	pm.mu.RLock()
 	defer pm.mu.RUnlock()
-
 	rules := make([]Rule, len(pm.rules))
 	copy(rules, pm.rules)
 	return rules
 }
 
-// PersistAlwaysAllow 将工具名写入 permission.json 的 allow 列表（去重后落盘），
-// 使"始终允许"在重启后仍然生效。
-func PersistAlwaysAllow(path, toolName string) error {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return err
+func rulePattern(rule Rule) string {
+	if rule.Tool == "bash" && rule.Content != "" {
+		return "Bash(" + rule.Content + ")"
 	}
+	if rule.Path != "" {
+		return rule.Tool + "(" + rule.Path + ")"
+	}
+	return rule.Tool
+}
+
+// PersistAlwaysAllow atomically appends one least-privilege rule to permission.json.
+func PersistAlwaysAllow(path string, rule Rule) error {
+	persistMu.Lock()
+	defer persistMu.Unlock()
 
 	var file permissionFile
-	if err := json.Unmarshal(data, &file); err != nil {
+	data, err := os.ReadFile(path)
+	if err == nil {
+		if err := json.Unmarshal(data, &file); err != nil {
+			return err
+		}
+	} else if !os.IsNotExist(err) {
 		return err
 	}
 
-	for _, v := range file.Permissions.Allow {
-		if v == toolName {
-			return nil // 已存在，无需重复写入
+	pattern := rulePattern(rule)
+	for _, existing := range file.Permissions.Allow {
+		if existing == pattern {
+			return nil
 		}
 	}
-
-	file.Permissions.Allow = append(file.Permissions.Allow, toolName)
+	file.Permissions.Allow = append(file.Permissions.Allow, pattern)
 	out, err := json.MarshalIndent(file, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(path, out, 0644)
+
+	dir := filepath.Dir(path)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(dir, ".permission-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer os.Remove(tmpName)
+	if err := tmp.Chmod(0644); err != nil {
+		tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(out); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
