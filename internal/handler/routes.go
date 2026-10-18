@@ -13,6 +13,7 @@ import (
 	"github.com/LennyFace24/MiniAgent/internal/store"
 	"github.com/LennyFace24/MiniAgent/internal/tools"
 	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
+	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
 
@@ -48,7 +49,10 @@ func SetupHandler(ctx context.Context, registry *modelmgr.Registry) (_ *mcp.MCPM
 		return nil, fmt.Errorf("初始化对话存储失败: %w", err)
 	}
 
-	fileService := service.NewFileService()
+	fileService, err := service.NewFileService()
+	if err != nil {
+		return nil, fmt.Errorf("初始化文件服务失败: %w", err)
+	}
 	collector := metrics.NewCollector()
 
 	getModel := func() modelmgr.Model {
@@ -97,6 +101,8 @@ func SetupRoutesWith(r *gin.Engine, hs *Handlers) {
 		api.POST("/permission/response", hs.Agent.PermissionResponse)
 
 		api.POST("/upload_file", hs.File.UploadFile)
+		api.GET("/documents", hs.File.ListDocuments)
+		api.DELETE("/documents/:name", hs.File.DeleteDocument)
 		api.POST("/search", hs.File.Search)
 		api.GET("/metrics", hs.Metrics.GetMetrics)
 		api.GET("/conversations", hs.Conversation.GetConversations)
@@ -156,10 +162,15 @@ func (hs *Handlers) SwitchModel(c *gin.Context) {
 	c.JSON(200, gin.H{"current": hs.Agent.service.ModelSet().CurrentID()})
 }
 
-// getContextStatus 获取上下文使用状态
+// getContextStatus 获取指定对话的上下文使用状态。
+// 未提供 conversation_id 或该对话尚未使用时返回 0/当前模型预算。
 func getContextStatus(c *gin.Context) {
-	state := contexttool.GetContextState()
-	usage := state.GetUsage()
+	sessionID, _ := sessions.Default(c).Get("session_id").(string)
+	conversationID := c.Query("conversation_id")
+	if conversationID == "" {
+		conversationID = "default"
+	}
+	usage := contexttool.GetContextRegistry().Usage(contexttool.ScopeKey(sessionID, conversationID))
 	c.JSON(200, usage)
 }
 

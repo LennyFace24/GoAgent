@@ -2,6 +2,7 @@ package contexttool
 
 import (
 	"context"
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -17,11 +18,24 @@ import (
 	"github.com/cloudwego/eino/schema"
 )
 
+//go:embed compact_rule.md
+var compactRule string
+
 const (
 	KeepRecentTurns        = 6
 	KeepRecentMicroCompact = 6
 	TranscriptDir          = "data/transcripts"
+
+	// HistoryIDExtraKey 由 store.LoadHistory 写入每条历史消息的稳定 ID。
+	HistoryIDExtraKey = "history_id"
 )
+
+// CompactionResult 描述一次完整压缩的落盘信息。
+type CompactionResult struct {
+	Summary      string
+	FirstKeptID  string
+	KeptMessages []*schema.Message
+}
 
 // ---------- compact 工具定义 ----------
 
@@ -121,31 +135,31 @@ func extractHint(content string, maxLen int) string {
 	return content
 }
 
-// CompactFunc Lever 2: old 消息总结为摘要，service 层调用
-func CompactFunc(ctx context.Context, messages []*schema.Message, chatModel model.BaseChatModel, sessionID, conversationID string) []*schema.Message {
+// CompactFunc Lever 2: 将早于最近 KeepRecentTurns 轮的消息总结为摘要。
+// 返回压缩后的消息和需要落盘的边界；调用方可据此持久化，避免下次重算。
+func CompactFunc(ctx context.Context, messages []*schema.Message, chatModel model.BaseChatModel, sessionID, conversationID string) ([]*schema.Message, *CompactionResult) {
 	if len(messages) <= 1 {
-		return messages
+		return messages, nil
 	}
-
-	persistTranscript(messages, sessionID, conversationID)
 
 	systemMsg := messages[0]
 	rest := messages[1:]
 
-	cutIdx := len(rest)
+	// 从后往前定位最近 KeepRecentTurns 轮；不足时 cutIdx 保持 0，不压缩。
+	// 边界必须是某个 user 消息，绝不能把当前用户输入一起摘要掉。
+	cutIdx := 0
 	count := 0
 	for i := len(rest) - 1; i >= 0; i-- {
 		if rest[i].Role == schema.User {
 			count++
-		}
-		if count >= KeepRecentTurns {
-			cutIdx = i
-			break
+			if count >= KeepRecentTurns {
+				cutIdx = i
+				break
+			}
 		}
 	}
-
-	if cutIdx <= 2 {
-		return messages
+	if cutIdx <= 0 {
+		return messages, nil
 	}
 
 	oldMessages := rest[:cutIdx]
@@ -154,16 +168,36 @@ func CompactFunc(ctx context.Context, messages []*schema.Message, chatModel mode
 	summary, err := summarizeOldMessages(ctx, oldMessages, chatModel)
 	if err != nil {
 		log.Printf("CompactFunc: 总结失败，跳过压缩: %v", err)
-		return messages
+		return messages, nil
 	}
+	persistTranscript(messages, sessionID, conversationID)
 
-	result := messages[:0]
-	result = append(result, systemMsg)
-	result = append(result, schema.UserMessage(summary))
+	result := make([]*schema.Message, 0, len(recentMessages)+2)
+	result = append(result, systemMsg, schema.UserMessage(summary))
 	result = append(result, recentMessages...)
 
-	log.Printf("CompactFunc: 压缩完成，消息数 %d -> %d", len(messages), len(result))
-	return result
+	// 只落盘带原始 ID 的历史消息；当前轮新消息由 handler 统一保存，避免重复。
+	kept := make([]*schema.Message, 0, len(recentMessages))
+	for _, msg := range recentMessages {
+		if _, ok := msg.Extra[HistoryIDExtraKey]; ok {
+			kept = append(kept, msg)
+		}
+	}
+	firstKeptID := ""
+	if len(kept) > 0 {
+		firstKeptID, _ = kept[0].Extra[HistoryIDExtraKey].(string)
+	}
+	if len(kept) == 0 {
+		// 没有可识别的原始消息（例如测试构造的内存历史），只做本次内存压缩。
+		return result, nil
+	}
+
+	log.Printf("CompactFunc: 压缩完成，消息数 %d -> %d，保留原始消息 %d", len(messages), len(result), len(kept))
+	return result, &CompactionResult{
+		Summary:      summary,
+		FirstKeptID:  firstKeptID,
+		KeptMessages: kept,
+	}
 }
 
 func summarizeOldMessages(ctx context.Context, messages []*schema.Message, chatModel model.BaseChatModel) (string, error) {
@@ -189,12 +223,10 @@ func summarizeOldMessages(ctx context.Context, messages []*schema.Message, chatM
 	if len(content) > 100000 {
 		content = content[:100000] + "\n...(截断)"
 	}
-	file, err := os.ReadFile("internal/tools/context_tool/compact_rule.md")
-	if err != nil {
-		log.Printf("summarizeOldMessages: 读取压缩规则文件失败: %v", err)
-		return "", err
+	data := strings.TrimSpace(compactRule)
+	if data == "" {
+		return "", fmt.Errorf("压缩规则为空")
 	}
-	data := strings.TrimSpace(string(file))
 
 	summarizePrompt := []*schema.Message{
 		schema.SystemMessage(data),

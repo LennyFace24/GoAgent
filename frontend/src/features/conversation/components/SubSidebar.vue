@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, nextTick } from 'vue'
+import { ref, nextTick, onMounted, watch } from 'vue'
 import { useConversations } from '../composables/useConversations'
 import type { Conversation } from '../types'
 import {
@@ -14,6 +14,7 @@ import {
   Search,
   Layers,
   Pencil,
+  Trash2,
 } from 'lucide-vue-next'
 
 const props = defineProps<{
@@ -35,7 +36,109 @@ const editingId = ref('')
 const editingTitle = ref('')
 const isUploading = ref(false)
 const uploadProgress = ref(0)
+const uploadError = ref('')
 const docsList = ref<string[]>([])
+const docsError = ref('')
+
+const ALLOWED_EXTENSIONS = ['.txt', '.md', '.pdf', '.json']
+
+async function loadDocuments(): Promise<void> {
+  try {
+    const res = await fetch('/api/documents', { credentials: 'include' })
+    if (!res.ok) {
+      docsError.value = `加载文档列表失败 (${res.status})`
+      return
+    }
+    const data = await res.json()
+    docsList.value = data.documents || []
+    docsError.value = ''
+  } catch {
+    docsError.value = '加载文档列表失败'
+  }
+}
+
+function handleFileSelect(event: Event): void {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (file) uploadFile(file)
+  input.value = ''
+}
+
+function handleDrop(event: DragEvent): void {
+  event.preventDefault()
+  const file = event.dataTransfer?.files?.[0]
+  if (file) uploadFile(file)
+}
+
+function uploadFile(file: File): void {
+  if (isUploading.value) return
+  const extension = file.name.slice(file.name.lastIndexOf('.')).toLowerCase()
+  if (!ALLOWED_EXTENSIONS.includes(extension)) {
+    uploadError.value = `不支持的文件类型: ${extension || '未知'}`
+    return
+  }
+
+  isUploading.value = true
+  uploadProgress.value = 0
+  uploadError.value = ''
+
+  const form = new FormData()
+  form.append('file', file)
+
+  const xhr = new XMLHttpRequest()
+  xhr.open('POST', '/api/upload_file')
+  xhr.withCredentials = true
+  xhr.upload.onprogress = (event) => {
+    if (event.lengthComputable) {
+      uploadProgress.value = Math.round((event.loaded / event.total) * 100)
+    }
+  }
+  xhr.onload = async () => {
+    let payload: { error?: string } = {}
+    try {
+      payload = JSON.parse(xhr.responseText)
+    } catch { /* ignore */ }
+    if (xhr.status >= 200 && xhr.status < 300) {
+      uploadProgress.value = 100
+      await loadDocuments()
+    } else {
+      uploadError.value = payload.error || `上传失败 (${xhr.status})`
+    }
+    isUploading.value = false
+  }
+  xhr.onerror = () => {
+    uploadError.value = '上传失败，请检查网络或后端服务'
+    isUploading.value = false
+  }
+  xhr.onabort = () => {
+    uploadError.value = '上传已取消'
+    isUploading.value = false
+  }
+  xhr.send(form)
+}
+
+async function handleDeleteDocument(name: string, event: MouseEvent): Promise<void> {
+  event.stopPropagation()
+  try {
+    const res = await fetch(`/api/documents/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+      credentials: 'include',
+    })
+    if (!res.ok) {
+      const payload = await res.json().catch(() => ({}))
+      docsError.value = payload.error || `删除失败 (${res.status})`
+      return
+    }
+    await loadDocuments()
+  } catch {
+    docsError.value = '删除失败，请重试'
+  }
+}
+
+onMounted(loadDocuments)
+watch(() => props.activeNav, (nav) => {
+  if (nav === 'rag') loadDocuments()
+})
 
 async function handleCreate(): Promise<void> {
   const id = await create()
@@ -267,6 +370,7 @@ function expand() {
             <span class="progress-text">入库向量化中 {{ uploadProgress }}%</span>
           </div>
         </div>
+        <p v-if="uploadError" class="upload-error">{{ uploadError }}</p>
 
         <!-- 已上传文档列表 -->
         <div class="docs-list-title">
@@ -274,11 +378,14 @@ function expand() {
           <span>已同步手册</span>
           <span class="docs-count">{{ docsList.length }}</span>
         </div>
+        <p v-if="docsError" class="docs-error">{{ docsError }}</p>
         <div class="docs-container">
           <div v-for="doc in docsList" :key="doc" class="doc-item">
             <FileText class="doc-icon" :size="14" :stroke-width="1.8" />
-            <span class="doc-name">{{ doc }}</span>
-            <span class="doc-badge">已向量化</span>
+            <span class="doc-name" :title="doc">{{ doc }}</span>
+            <button class="doc-delete-btn" @click="handleDeleteDocument(doc, $event)" title="删除文档">
+              <Trash2 :size="12" :stroke-width="2" />
+            </button>
           </div>
         </div>
       </div>
@@ -708,6 +815,19 @@ function expand() {
   font-family: var(--font-mono);
 }
 
+.upload-error,
+.docs-error {
+  margin: -12px 0 14px;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  color: var(--text-error);
+  word-break: break-word;
+}
+
+.docs-error {
+  margin-top: -4px;
+}
+
 /* ---------- 文档列表 ---------- */
 .docs-list-title {
   display: flex;
@@ -766,14 +886,27 @@ function expand() {
   color: var(--text-primary);
 }
 
-.doc-badge {
-  font-size: 0.58rem;
-  background: var(--accent-soft);
-  color: var(--accent-bright);
-  padding: 2px 7px;
-  border-radius: var(--radius-pill);
-  letter-spacing: 0.04em;
-  font-weight: 600;
-  text-transform: uppercase;
+.doc-delete-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  width: 20px;
+  height: 20px;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  opacity: 0;
+  transition: all var(--transition-fast);
+}
+
+.doc-item:hover .doc-delete-btn {
+  opacity: 1;
+}
+
+.doc-delete-btn:hover {
+  color: var(--text-error);
+  background: rgba(255, 90, 110, 0.1);
 }
 </style>

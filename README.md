@@ -220,7 +220,9 @@ sandbox:
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| `POST` | `/api/upload_file` | 上传文件并处理到知识库 |
+| `POST` | `/api/upload_file` | 上传文件并处理到知识库（同名文件覆盖旧向量） |
+| `GET` | `/api/documents` | 列出已入库文件名 |
+| `DELETE` | `/api/documents/:name` | 删除指定文件名的全部向量 |
 | `POST` | `/api/search` | 检索知识库内容 |
 | `GET` | `/api/conversations` | 获取会话列表 |
 | `POST` | `/api/conversation` | 创建会话，可传 `title` 指定名称 |
@@ -235,7 +237,7 @@ sandbox:
 | `GET` | `/api/metrics` | 获取运行指标 |
 | `GET` | `/api/commands` | 获取可用斜杠命令 |
 | `GET` | `/api/model` | 获取当前模型名称 |
-| `GET` | `/context` | 获取上下文使用状态 |
+| `GET` | `/api/context/status?conversation_id=...` | 获取指定对话的上下文使用状态；`/context` 为兼容路径 |
 
 ### 请求示例
 

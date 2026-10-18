@@ -5,6 +5,7 @@ import (
 
 	"github.com/LennyFace24/MiniAgent/internal/commands"
 	"github.com/LennyFace24/MiniAgent/internal/store"
+	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -79,7 +80,7 @@ func (h *CommandHandler) Execute(c *gin.Context) {
 		return
 	}
 
-	result, err := cmd.Handler(c.Request.Context(), req.Args)
+	result, err := cmd.Handler(contexttool.WithScope(c.Request.Context(), sessionID, conversationID), req.Args)
 	if err != nil {
 		c.JSON(500, gin.H{"error": err.Error()})
 		return

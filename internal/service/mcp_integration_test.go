@@ -122,7 +122,7 @@ func TestMCPApprovalPreservesProtocolFailure(t *testing.T) {
 				SessionID: "approval-session", ConversationID: "approval-conversation",
 				ChatModel: snapshot.ChatModel, ToolModel: snapshot.ToolModel, CtxState: contexttool.NewContextState(200000),
 			}
-			go svc.runLoop(ctx, mc, generator, toolEvents, contexttool.NewContextState(200000))
+			go svc.runLoop(ctx, mc, generator, toolEvents)
 			result := ""
 			permissionSeen := false
 		loop:

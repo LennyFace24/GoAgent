@@ -37,7 +37,10 @@ func newTestRouter(t *testing.T) *gin.Engine {
 		t.Fatalf("NewConversationStore: %v", err)
 	}
 
-	fileService := service.NewFileService()
+	fileService, err := service.NewFileService()
+	if err != nil {
+		t.Fatalf("NewFileService: %v", err)
+	}
 	collector := metrics.NewCollector()
 
 	registry, err := modelmgr.Load("../../model.json")
@@ -118,6 +121,8 @@ func TestRouteTable(t *testing.T) {
 		{http.MethodDelete, "/api/conversation/default"},
 		{http.MethodPost, "/api/commands/execute"},
 		{http.MethodPost, "/api/upload_file"},
+		{http.MethodGet, "/api/documents"},
+		{http.MethodDelete, "/api/documents/default"},
 		{http.MethodPost, "/api/search"},
 		{http.MethodPost, "/api/chat_stream"},
 		{http.MethodPost, "/api/ai_ops"},

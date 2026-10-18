@@ -1,8 +1,12 @@
 package store
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -166,5 +170,124 @@ func TestDeleteConversationRemovesHistory(t *testing.T) {
 	msgs, _ := s.LoadHistory(sessionID, convID)
 	if len(msgs) != 0 {
 		t.Fatalf("after delete, len(msgs) = %d, want 0", len(msgs))
+	}
+	if err := s.DeleteConversation(sessionID, convID); err != nil {
+		t.Fatalf("delete missing conversation should be idempotent: %v", err)
+	}
+}
+
+func TestDeleteConversationReportsRemovalErrors(t *testing.T) {
+	s := newTestStore(t)
+	const sessionID = "sess"
+	meta, err := s.CreateConversation(sessionID, "c")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveMessages(sessionID, meta.ID, schema.UserMessage("x")); err != nil {
+		t.Fatal(err)
+	}
+
+	// 用非空目录占住历史文件路径，制造跨平台可复现的删除失败。
+	historyPath := s.filePath(sessionID, meta.ID)
+	if err := os.Remove(historyPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(historyPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(historyPath, "block"), []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	err = s.DeleteConversation(sessionID, meta.ID)
+	if err == nil || !strings.Contains(err.Error(), filepath.Base(historyPath)) {
+		t.Fatalf("delete error = %v, want wrapped history path error", err)
+	}
+}
+
+func TestLoadHistorySupportsLinesLargerThanScannerDefault(t *testing.T) {
+	s := newTestStore(t)
+	const sessionID = "sess"
+	meta, err := s.CreateConversation(sessionID, "long")
+	if err != nil {
+		t.Fatal(err)
+	}
+	longContent := strings.Repeat("工具输出", 40_000) // 约 480KB，远超 64KB 默认上限
+	if err := s.SaveMessages(sessionID, meta.ID, schema.ToolMessage(longContent, "call-1", schema.WithToolName("bash"))); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, err := s.LoadHistory(sessionID, meta.ID)
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(msgs) != 1 {
+		t.Fatalf("long line load returned %d messages, want 1", len(msgs))
+	}
+	if msgs[0].Content != longContent {
+		t.Fatalf("long line truncated: got %d bytes, want %d", len(msgs[0].Content), len(longContent))
+	}
+}
+
+func TestLoadHistoryAppliesCompactionAndKeepsLaterMessages(t *testing.T) {
+	s := newTestStore(t)
+	const sessionID = "sess"
+	meta, err := s.CreateConversation(sessionID, "compact")
+	if err != nil {
+		t.Fatal(err)
+	}
+	convID := meta.ID
+	if err := s.SaveMessages(sessionID, convID,
+		schema.UserMessage("old-user"),
+		schema.AssistantMessage("old-reply", nil),
+		schema.UserMessage("recent-user"),
+		schema.AssistantMessage("recent-reply", nil),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	kept := []*schema.Message{
+		schema.UserMessage("recent-user"),
+		schema.AssistantMessage("recent-reply", nil),
+	}
+	if err := s.SaveCompaction(sessionID, convID, "summary-marker", "3", kept); err != nil {
+		t.Fatalf("SaveCompaction: %v", err)
+	}
+
+	msgs, err := s.LoadHistory(sessionID, convID)
+	if err != nil {
+		t.Fatalf("LoadHistory: %v", err)
+	}
+	if len(msgs) != 3 || msgs[0].Content != "summary-marker" || msgs[1].Content != "recent-user" || msgs[2].Content != "recent-reply" {
+		t.Fatalf("compaction boundary not applied: %v", msgs)
+	}
+
+	raw, err := os.ReadFile(s.filePath(sessionID, convID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstLine, _, _ := strings.Cut(string(raw), "\n")
+	var record struct {
+		Role        string `json:"role"`
+		Summary     string `json:"summary"`
+		FirstKeptID string `json:"first_kept_id"`
+	}
+	if err := json.Unmarshal([]byte(firstLine), &record); err != nil {
+		t.Fatal(err)
+	}
+	if record.Role != "compaction" || record.Summary != "summary-marker" || record.FirstKeptID != "3" {
+		t.Fatalf("compaction record = %+v", record)
+	}
+
+	// 压缩后的新消息继续追加，加载时仍保留摘要与顺序。
+	if err := s.SaveMessages(sessionID, convID, schema.UserMessage("after-compaction")); err != nil {
+		t.Fatal(err)
+	}
+	msgs, err = s.LoadHistory(sessionID, convID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 4 || msgs[3].Content != "after-compaction" {
+		t.Fatalf("messages after compaction were lost: %v", msgs)
 	}
 }

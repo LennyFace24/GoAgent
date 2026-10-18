@@ -17,8 +17,10 @@ func NewContextStatusTool() (tool.InvokableTool, error) {
 		"context_status",
 		"查询当前上下文的 token 使用情况，包括使用百分比和消息数量",
 		func(ctx context.Context, input ContextStatusInput) (string, error) {
-			state := GetContextState()
-			usage := state.GetUsage()
+			usage := ContextUsage{MaxTokens: GetContextRegistry().MaxTokens()}
+			if scope, ok := ScopeFromContext(ctx); ok {
+				usage = GetContextRegistry().Usage(scope)
+			}
 
 			status := "正常"
 			if usage.IsCritical() {

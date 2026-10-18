@@ -165,7 +165,7 @@ func TestRequestKeepsPreparedModelAfterSwitch(t *testing.T) {
 	if want := []string{"first", "first", "second"}; !reflect.DeepEqual(modelIDs, want) {
 		t.Fatalf("model changed inside an in-flight request: got %v, want %v", modelIDs, want)
 	}
-	if got := contexttool.GetContextState().MaxTokens(); got != 40000-128-64 {
+	if got := contexttool.GetContextRegistry().MaxTokens(); got != 40000-128-64 {
 		t.Fatalf("new request retained the previous model budget: %d", got)
 	}
 }
@@ -231,6 +231,18 @@ func TestStreamSummarizesOldHistoryBeforeSendingConversation(t *testing.T) {
 	drainLifecycle(t, iterator, events)
 	if summaries.Load() != 1 || streams.Load() != 1 {
 		t.Fatalf("precheck/loop repeated compaction: summaries=%d streams=%d", summaries.Load(), streams.Load())
+	}
+	persisted, err := svc.store.LoadHistory("session", "conversation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(persisted) != 11 || persisted[0].Content != "condensed-history-marker" {
+		t.Fatalf("compaction was not persisted: %d messages, first=%q", len(persisted), persisted[0].Content)
+	}
+	for _, message := range persisted {
+		if message.Content == "current-user-marker" {
+			t.Fatal("current user message was persisted twice by compaction")
+		}
 	}
 }
 

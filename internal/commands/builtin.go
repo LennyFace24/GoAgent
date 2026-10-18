@@ -7,6 +7,7 @@ import (
 	"github.com/LennyFace24/MiniAgent/internal/modelmgr"
 	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 )
+
 // registerBuiltinCommands 注册内置命令
 func registerBuiltinCommands(r *Registry) {
 	builtins := []Command{
@@ -72,9 +73,12 @@ func compactHandler(ctx context.Context, args []string) (string, error) {
 	return "已触发上下文压缩，将在下一次回复前自动压缩历史消息。", nil
 }
 
-// contextHandler 返回当前上下文 Token 使用情况
+// contextHandler 返回当前请求所属对话的上下文 Token 使用情况。
 func contextHandler(ctx context.Context, args []string) (string, error) {
-	usage := contexttool.GetContextState().GetUsage()
+	usage := contexttool.ContextUsage{MaxTokens: contexttool.GetContextRegistry().MaxTokens()}
+	if scope, ok := contexttool.ScopeFromContext(ctx); ok {
+		usage = contexttool.GetContextRegistry().Usage(scope)
+	}
 	return usage.String(), nil
 }
 

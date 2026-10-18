@@ -73,7 +73,7 @@ func (s *AgentService) SwitchModel(ctx context.Context, id string) error {
 	if err := s.models.Switch(ctx, id); err != nil {
 		return err
 	}
-	contexttool.GetContextState().ConfigureMaxTokens(s.models.Current().ContextBudgetTokens())
+	contexttool.GetContextRegistry().SetMaxTokens(s.models.Current().ContextBudgetTokens())
 	return nil
 }
 
@@ -83,11 +83,11 @@ func (s *AgentService) Stream(ctx context.Context,
 
 	history, err := s.store.LoadHistory(sessionID, conversationID)
 	if err != nil {
-		log.Printf("AgentService: 加载历史失败 %v", err)
-		history = nil
+		return nil, nil, fmt.Errorf("加载对话历史失败: %w", err)
 	}
 
-	globalState := contexttool.GetContextState()
+	scope := contexttool.ScopeKey(sessionID, conversationID)
+	state := contexttool.GetContextRegistry().State(scope)
 
 	// 预算检查在槽位组装之后执行，因此会把 system 和当前用户输入计入。
 	pl := pipeline.New(
@@ -112,16 +112,18 @@ func (s *AgentService) Stream(ctx context.Context,
 		SessionID:      sessionID,
 		ConversationID: conversationID,
 		History:        history,
+		CtxState:       state,
+		PersistCompaction: func(result *contexttool.CompactionResult) error {
+			return s.store.SaveCompaction(sessionID, conversationID, result.Summary, result.FirstKeptID, result.KeptMessages)
+		},
 	}
 	if err := pl.Run(ctx, mc); err != nil {
 		return nil, nil, err
 	}
 
-	globalState.ConfigureMaxTokens(mc.CtxState.MaxTokens())
-	globalState.SetTokens(mc.CtxState.GetUsage().CurrentTokens)
 	iterator, generator := adk.NewAsyncIteratorPair[*adk.AgentEvent]()
 	toolEvents := make(chan ToolEvent, 64)
-	go s.runLoop(ctx, mc, generator, toolEvents, globalState)
+	go s.runLoop(ctx, mc, generator, toolEvents)
 	return iterator, toolEvents, nil
 }
 
@@ -193,7 +195,6 @@ func (s *AgentService) runLoop(
 	mc *pipeline.MessageContext,
 	gen *adk.AsyncGenerator[*adk.AgentEvent],
 	toolEvents chan ToolEvent,
-	globalState *contexttool.ContextState,
 ) {
 
 	defer close(toolEvents)
@@ -239,7 +240,9 @@ func (s *AgentService) runLoop(
 			}
 			switch level {
 			case contexttool.CompactFull:
-				messages = contexttool.CompactFunc(ctx, messages, mc.ChatModel, mc.SessionID, mc.ConversationID)
+				// 工具循环中的压缩只影响本次请求；落盘由下一轮请求的管线统一完成，
+				// 避免把尚未保存的当前轮消息重复写入历史。
+				messages, _ = contexttool.CompactFunc(ctx, messages, mc.ChatModel, mc.SessionID, mc.ConversationID)
 			case contexttool.CompactMicro:
 				messages = contexttool.MicroCompactFunc(messages)
 			}
@@ -431,9 +434,8 @@ func (s *AgentService) runLoop(
 			messages = append(messages, msg)
 		}
 
-		// 更新上下文状态（使用本次请求的独立实例）
+		// 更新本次对话的上下文状态
 		ctxState.EstimateAndEstimateMessages(messages)
-		globalState.SetTokens(ctxState.GetUsage().CurrentTokens)
 	}
 }
 

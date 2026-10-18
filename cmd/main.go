@@ -44,7 +44,7 @@ func run(ctx context.Context) error {
 		registry = modelmgr.DefaultRegistry()
 	}
 	defaultModel := registry.Default()
-	contexttool.GetContextState().ConfigureMaxTokens(defaultModel.ContextBudgetTokens())
+	contexttool.GetContextRegistry().SetMaxTokens(defaultModel.ContextBudgetTokens())
 
 	r := gin.Default()
 	r.Use(middleware.CORS())

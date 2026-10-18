@@ -35,6 +35,9 @@ type MessageContext struct {
 	Manager  *ctxmgr.ContextManager
 	History  []*schema.Message
 	Messages []*schema.Message
+
+	// PersistCompaction 由 AgentService 注入，把一次完整压缩的结果写入对话历史。
+	PersistCompaction func(*contexttool.CompactionResult) error
 }
 
 // Stage 管线阶段

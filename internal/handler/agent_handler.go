@@ -11,6 +11,7 @@ import (
 
 	"github.com/LennyFace24/MiniAgent/internal/permission"
 	"github.com/LennyFace24/MiniAgent/internal/service"
+	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/cloudwego/eino/schema"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
@@ -47,12 +48,10 @@ func (h *AgentHandler) Stream(c *gin.Context) {
 
 	sessionID := sessions.Default(c).Get("session_id").(string)
 	conversationID := req.ConversationID
-	ctx = context.WithValue(ctx, "session_id", sessionID)
-	ctx = context.WithValue(ctx, "conversation_id", conversationID)
-
 	if conversationID == "" {
 		conversationID = "default"
 	}
+	ctx = contexttool.WithScope(ctx, sessionID, conversationID)
 
 	iter, toolEvents, err := h.service.Stream(ctx, mode, sessionID, conversationID, req.Message)
 	if err != nil {

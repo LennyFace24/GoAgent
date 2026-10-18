@@ -182,24 +182,6 @@ function handleSend(text: string): void {
 
 // ---------- 内置命令 ----------
 
-async function showContextStatus() {
-  try {
-    const res = await fetch('/api/context/status', {
-      credentials: 'include',
-    })
-
-    if (res.ok) {
-      const data = await res.json()
-      const stateLabel = data.percentage > 90 ? '危险' : data.percentage > 70 ? '警告' : '正常'
-      messages.value.push({
-        id: Date.now(),
-        role: 'assistant',
-        content: `**上下文状态**\n\n- Token 使用: ${data.current_tokens.toLocaleString()} / ${data.max_tokens.toLocaleString()} (${data.percentage.toFixed(1)}%)\n- 消息数量: ${data.message_count}\n- 状态: ${stateLabel}`,
-      })
-    }
-  } catch { /* ignore */ }
-}
-
 function showHelp() {
   messages.value.push({
     id: Date.now(),
@@ -289,7 +271,7 @@ const modeOptions: ModeOption[] = [
           </select>
           <span v-if="modelSwitchError" class="model-switch-error">{{ modelSwitchError }}</span>
         </div>
-        <ContextStatus />
+        <ContextStatus :conversation-id="conversationIdRef" />
         <button class="monitor-indicator" disabled title="实时系统状态常驻右侧">
           <MonitorPlay :size="14" :stroke-width="2" />
           <span>实时系统状态</span>

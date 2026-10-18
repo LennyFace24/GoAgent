@@ -10,6 +10,7 @@ import (
 
 	"github.com/LennyFace24/MiniAgent/internal/permission"
 	"github.com/LennyFace24/MiniAgent/internal/store"
+	contexttool "github.com/LennyFace24/MiniAgent/internal/tools/context_tool"
 	"github.com/gin-contrib/sessions"
 	"github.com/gin-gonic/gin"
 )
@@ -145,6 +146,7 @@ func (h *ConversationHandler) DeleteConversation(c *gin.Context) {
 		return
 	}
 	h.perms.ClearScope(permission.ScopeKey(sessionID, conversationID))
+	contexttool.GetContextRegistry().Delete(contexttool.ScopeKey(sessionID, conversationID))
 
 	c.JSON(http.StatusOK, gin.H{"message": "已删除"})
 }

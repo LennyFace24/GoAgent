@@ -119,5 +119,48 @@ async def delete(req: DeleteRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def collection_or_none(name: str):
+    if name not in [c.name for c in client.list_collections()]:
+        return None
+    return client.get_collection(name=name)
+
+
+@app.get("/documents")
+async def list_documents(collection_name: str, limit: int = 1000, offset: int = 0):
+    try:
+        collection = collection_or_none(collection_name)
+        if collection is None:
+            return {"status": "ok", "documents": []}
+        result = collection.get(
+            include=["documents", "metadatas"],
+            limit=limit,
+            offset=offset,
+        )
+        documents = []
+        ids = result.get("ids") or []
+        contents = result.get("documents") or []
+        metadatas = result.get("metadatas") or []
+        for index, doc_id in enumerate(ids):
+            documents.append({
+                "id": doc_id,
+                "document": contents[index] if index < len(contents) else None,
+                "metadata": metadatas[index] if index < len(metadatas) else None,
+            })
+        return {"status": "ok", "documents": documents}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/documents")
+async def delete_documents(collection_name: str, source: str):
+    try:
+        collection = collection_or_none(collection_name)
+        if collection is not None:
+            collection.delete(where={"source": source})
+        return {"status": "deleted", "source": source}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8088)

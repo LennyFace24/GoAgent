@@ -75,6 +75,8 @@ GoAgent/
 - 命令命中（builtin/file-based/skill）由前端调 `/api/commands/execute` 短路，不进管线。
 - `pl.Run(ctx, mc)` 顺序调用 Stage；ModelPrep 将本次请求的模型实例和预算写入 `mc`，ContextBuild 每次创建新的请求级 `ContextManager`，避免不同请求、模式和激活 Skill 共享可变 `slots`。
 - ContextBuild 先组装完整消息，CompactCheck 再对最终的 system + history + user 消息统一使用 `contexttool.EstimateTokens` 估算，执行微压缩或摘要压缩；不再用 `len/3` 与固定 Slot 开销混算。完整压缩使用无工具绑定的摘要模型并保留系统消息、近期历史和当前输入。
+- 完整压缩完成后，摘要与保留消息以 `compaction` 记录原子写回对话 JSONL；后续加载只返回摘要及之后的原始消息，不再每次请求重新摘要。压缩前一版转录仍保存到 `data/transcripts/`。
+- 上下文使用状态按 `sessionID + conversationID` 注册，接口、`/context` 命令和 `context_status` 工具都读取当前对话；删除对话会同步清理状态。
 - `cl100k_base` 和字符 fallback 都只是请求前估算；Provider 可能使用不同 tokenizer 或包含额外 Chat Template/Tool Schema 开销，因此通过模型配置的安全余量吸收误差，不宣称估算绝对精确。
 - 与原七步规划相比，事件 Hook 层（EventBus/EventTrigger）不实现且相关占位代码已删除；非错误 Skip 短路仍未完成。发送阶段明确留在 Stream，不保留空阶段。原计划保留独立 runLoop，不是把每轮工具执行改写为预处理阶段。
 

@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"time"
 )
+
+const chromaRequestTimeout = 30 * time.Second
 
 type ChromaStore struct {
 	baseURL    string
@@ -15,8 +19,10 @@ type ChromaStore struct {
 
 func NewChromaStore(baseURL string) *ChromaStore {
 	return &ChromaStore{
-		baseURL:    baseURL,
-		httpClient: &http.Client{},
+		baseURL: baseURL,
+		httpClient: &http.Client{
+			Timeout: chromaRequestTimeout,
+		},
 	}
 }
 
@@ -29,27 +35,29 @@ func (s *ChromaStore) CreateCollection(name string) error {
 }
 
 type InsertRequest struct {
-	CollectionName string      `json:"collection_name"`
-	IDs            []string    `json:"ids"`
-	Embeddings     [][]float64 `json:"embeddings"`
-	Documents      []string    `json:"documents,omitempty"`
+	CollectionName string           `json:"collection_name"`
+	IDs            []string         `json:"ids"`
+	Embeddings     [][]float64      `json:"embeddings"`
+	Documents      []string         `json:"documents,omitempty"`
+	Metadatas      []map[string]any `json:"metadatas,omitempty"`
 }
 
-func (s *ChromaStore) Insert(collectionName string, ids []string, embeddings [][]float64, documents []string) error {
+func (s *ChromaStore) Insert(collectionName string, ids []string, embeddings [][]float64, documents []string, metadatas []map[string]any) error {
 	body := InsertRequest{
 		CollectionName: collectionName,
 		IDs:            ids,
 		Embeddings:     embeddings,
 		Documents:      documents,
+		Metadatas:      metadatas,
 	}
 	_, err := s.doRequest("POST", "/insert", body)
 	return err
 }
 
 type SearchResult struct {
-	IDs       [][]string    `json:"ids"`
-	Distances [][]float64   `json:"distances"`
-	Documents [][]string    `json:"documents"`
+	IDs       [][]string  `json:"ids"`
+	Distances [][]float64 `json:"distances"`
+	Documents [][]string  `json:"documents"`
 }
 
 type SearchResponse struct {
@@ -84,6 +92,40 @@ func (s *ChromaStore) Delete(collectionName string, ids []string) error {
 		"ids":             ids,
 	}
 	_, err := s.doRequest("POST", "/delete", body)
+	return err
+}
+
+// ChromaDocument 表示 Chroma 中的一条文档记录。
+type ChromaDocument struct {
+	ID       string         `json:"id"`
+	Document string         `json:"document"`
+	Metadata map[string]any `json:"metadata"`
+}
+
+type documentsResponse struct {
+	Status    string           `json:"status"`
+	Documents []ChromaDocument `json:"documents"`
+}
+
+// ListDocuments 返回 collection 中的全部文档记录。
+func (s *ChromaStore) ListDocuments(collectionName string) ([]ChromaDocument, error) {
+	path := fmt.Sprintf("/documents?collection_name=%s", url.QueryEscape(collectionName))
+	resp, err := s.doRequest("GET", path, nil)
+	if err != nil {
+		return nil, err
+	}
+	var result documentsResponse
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return nil, fmt.Errorf("parse documents response: %w", err)
+	}
+	return result.Documents, nil
+}
+
+// DeleteBySource 删除 metadata.source 等于 source 的所有向量。
+func (s *ChromaStore) DeleteBySource(collectionName, source string) error {
+	path := fmt.Sprintf("/documents?collection_name=%s&source=%s",
+		url.QueryEscape(collectionName), url.QueryEscape(source))
+	_, err := s.doRequest("DELETE", path, nil)
 	return err
 }
 

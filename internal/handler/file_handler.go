@@ -58,6 +58,30 @@ func (h *FileHandler) UploadFile(c *gin.Context) {
 	})
 }
 
+// ListDocuments 返回已入库的文件名列表。
+func (h *FileHandler) ListDocuments(c *gin.Context) {
+	documents, err := h.fileService.ListDocuments(c.Request.Context())
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"documents": documents})
+}
+
+// DeleteDocument 删除指定文件名的全部向量。
+func (h *FileHandler) DeleteDocument(c *gin.Context) {
+	name := strings.TrimSpace(c.Param("name"))
+	if name == "" {
+		c.JSON(400, gin.H{"error": "文件名不能为空"})
+		return
+	}
+	if err := h.fileService.DeleteDocument(c.Request.Context(), name); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(200, gin.H{"status": "ok", "file": name})
+}
+
 func (h *FileHandler) Search(c *gin.Context) {
 	var req struct {
 		Query string `json:"query" binding:"required"`

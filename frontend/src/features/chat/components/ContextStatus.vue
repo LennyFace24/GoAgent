@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { Gauge } from 'lucide-vue-next'
 
 interface ContextUsage {
@@ -8,6 +8,10 @@ interface ContextUsage {
   percentage: number
   message_count: number
 }
+
+const props = defineProps<{
+  conversationId: string
+}>()
 
 const usage = ref<ContextUsage>({
   current_tokens: 0,
@@ -18,10 +22,17 @@ const usage = ref<ContextUsage>({
 
 const status = ref<'normal' | 'warning' | 'critical'>('normal')
 let interval: ReturnType<typeof setInterval> | null = null
+let requestSeq = 0
 
 async function fetchContextStatus() {
+  const seq = ++requestSeq
+  const conversationId = props.conversationId
+  if (!conversationId) return
   try {
-    const res = await fetch('/api/context/status')
+    const res = await fetch(`/api/context/status?conversation_id=${encodeURIComponent(conversationId)}`, {
+      credentials: 'include',
+    })
+    if (seq !== requestSeq) return
     if (res.ok) {
       const data = await res.json()
       usage.value = data
@@ -50,15 +61,32 @@ function formatTokens(tokens: number): string {
   return tokens.toString()
 }
 
-const barColor = computed(() => {
-  if (status.value === 'critical') return 'var(--text-error)'
-  if (status.value === 'warning') return 'var(--text-warning)'
-  return 'var(--accent-bright)'
-})
+const barColor = ref('var(--accent-bright)')
+
+function updateStatusAppearance(): void {
+  if (status.value === 'critical') barColor.value = 'var(--text-error)'
+  else if (status.value === 'warning') barColor.value = 'var(--text-warning)'
+  else barColor.value = 'var(--accent-bright)'
+}
+
+watch(status, updateStatusAppearance)
 
 onMounted(() => {
   fetchContextStatus()
   interval = setInterval(fetchContextStatus, 5000) // 每 5 秒刷新
+})
+
+watch(() => props.conversationId, (id, previous) => {
+  if (id === previous) return
+  // 切换对话时先清空旧数字，再拉取该对话自己的状态。
+  usage.value = {
+    current_tokens: 0,
+    max_tokens: usage.value.max_tokens,
+    percentage: 0,
+    message_count: 0,
+  }
+  status.value = 'normal'
+  fetchContextStatus()
 })
 
 onUnmounted(() => {
