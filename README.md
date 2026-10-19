@@ -1,6 +1,6 @@
 # GoAgent
 
-一个基于 Go、Eino 和 Gin 构建的可扩展 AI Agent 服务。项目提供流式对话、AIOps 诊断、文件知识库检索、工具调用、会话管理以及上下文状态查询等能力，并通过 Docker Compose 集成前端、后端和 Chroma 向量数据库。
+一个基于 Go、Eino 和 Gin 构建的可扩展 AI Agent 服务。项目提供流式对话、AIOps 诊断、文件知识库检索、工具调用、会话管理以及上下文状态查询等能力，并通过 Docker Compose 集成 Go 服务（含前端静态资源）与 Chroma 向量数据库。
 
 > 项目当前仍处于持续开发阶段。README 会尽量按照当前代码库的实际实现进行说明，未完成的功能会明确标注。
 
@@ -16,7 +16,7 @@
 - **输出截断保护**：模型达到最大输出上限时保留已生成内容并标注截断，不执行该轮不完整的工具调用。
 - **请求级执行一致性**：一次请求固定使用准备好的对话模型、摘要模型和 Token 预算；切换模型影响后续请求。Slot 与历史组装后统一预检压缩，工具循环最多执行 20 个工具轮次，再禁用工具请求最终回答。
 - **上下文监控**：提供当前上下文使用量查询，避免超过模型上下文窗口。
-- **前后端分离**：后端提供 HTTP API，前端通过 Nginx 提供 Web 界面。
+- **统一入口**：Go 同时托管 Web 静态资源与 `/api/*`，前端构建产物由同一端口提供，不再依赖独立 Nginx 容器。
 
 ## 技术栈
 
@@ -25,7 +25,7 @@
 - **大语言模型**：兼容 OpenAI API 格式的模型服务
 - **Embedding**：兼容 OpenAI API 格式的 Embedding 服务
 - **向量数据库**：Chroma 服务（基于 Milvus Lite）
-- **前端**：Node.js 20、Nginx
+- **前端**：Vue 3、Vite、TypeScript（Node.js 20 构建）
 - **部署**：Docker、Docker Compose
 
 ## 项目结构
@@ -86,17 +86,20 @@ Compose 将 `model.json` 只读挂载到后端 `/app/model.json`；文件必须�
 docker compose up -d --build
 ```
 
+从旧版（含独立 `frontend` 容器）升级时，先用 `docker compose down` 清掉旧容器，或执行 `docker compose up -d --build --remove-orphans`，避免旧 Nginx 容器继续占用 80 端口。
+
 4. 访问服务：
 
-- Web 前端：`http://localhost`
+- Web 前端：`http://localhost`（映射到后端 8080）
 - 后端 API：`http://localhost:8080`
 - 向量服务：`http://localhost:8088`
+
+镜像构建阶段会执行前端 `npm ci && npm run build`，产物复制到 `/app/frontend/dist`，由 Go 在同一端口托管页面和 `/api/*`，不再启动独立 Nginx 容器。
 
 查看日志：
 
 ```bash
 docker compose logs -f backend
-docker compose logs -f frontend
 docker compose logs -f chromadb
 ```
 
@@ -159,7 +162,7 @@ go run ./cmd
 npm --prefix frontend run dev
 ```
 
-Vite 开发界面默认是 `http://localhost:3000`，通过原有代理访问本机 `8080` 端口。已有 Docker/Nginx 部署保持不变；本次统一入口没有将前端产物加入 Go Docker 镜像。
+Vite 开发界面默认是 `http://localhost:3000`，通过原有代理访问本机 `8080` 端口。Docker Compose 同样使用 Go 统一入口，镜像内已包含前端构建产物，不再维护独立 Nginx 部署。
 
 如果需要单独启动向量服务：
 
@@ -340,10 +343,10 @@ go build -o bin/goagent.exe ./cmd
 
 前两条命令负责构建，最后一条才是启动；后续演示可直接执行最后一条。运行时保留 `frontend/dist`、配置和 Prompt 文件，当前不是嵌入前端的单文件发行包。Linux/macOS 可构建为 `go build -o bin/goagent ./cmd` 并执行 `./bin/goagent`。
 
-构建 Docker 镜像：
+构建 Docker 镜像（多阶段构建，自动编译前端并打包进运行时镜像）：
 
 ```bash
-docker build -t goagent-backend .
+docker build -t goagent .
 ```
 
 ## 安全建议

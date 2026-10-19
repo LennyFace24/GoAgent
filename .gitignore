@@ -19,6 +19,9 @@ model.json
 
 # Data
 data/
+# Chroma runtime data (local sqlite/bin files, Docker uses a named volume)
+chroma/chroma_data/
+chroma_data/
 
 
 # Uploaded files

@@ -1,0 +1,15 @@
+.git
+**/.git
+.gocache
+**/node_modules
+frontend/dist
+data
+gp
+chroma/.venv
+chroma/chroma_data
+.test
+*.log
+config.yaml
+model.json
+permission.json
+.mcp.json
