@@ -95,9 +95,9 @@ func (t *TaskManager) UpdateStatusTool() (tool.InvokableTool, error) {
 
 			t.mu.Lock()
 			defer t.mu.Unlock()
-			
-			path := fmt.Sprintf(taskDir+"/task_%d.json", input.Id)	
-			file,err := os.ReadFile(path)
+
+			path := fmt.Sprintf(taskDir+"/task_%d.json", input.Id)
+			file, err := os.ReadFile(path)
 			if err != nil {
 				return "", fmt.Errorf("task with ID %d not found", input.Id)
 			}
@@ -118,18 +118,22 @@ func (t *TaskManager) UpdateStatusTool() (tool.InvokableTool, error) {
 
 }
 
+type GetTaskInput struct {
+	ID int `json:"id" description:"任务ID" required:"true"`
+}
+
 func (t *TaskManager) GetTaskTool() (tool.InvokableTool, error) {
 	return utils.InferTool(
 		"get_task",
 		"获取任务详情，包括主题、描述、状态和阻塞关系",
-		func(ctx context.Context, taskId int) (string, error) {
+		func(ctx context.Context, input GetTaskInput) (string, error) {
 			t.mu.RLock()
 			defer t.mu.RUnlock()
 
-			path := fmt.Sprintf(taskDir+"/task_%d.json", taskId)
+			path := fmt.Sprintf(taskDir+"/task_%d.json", input.ID)
 			jsonData, err := os.ReadFile(path)
 			if err != nil {
-				return fmt.Sprintf("Task with ID %d not found", taskId), nil
+				return fmt.Sprintf("Task with ID %d not found", input.ID), nil
 			}
 			return string(jsonData), nil
 		},
