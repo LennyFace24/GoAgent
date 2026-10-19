@@ -18,6 +18,7 @@ import (
 	"github.com/cloudwego/eino-ext/components/document/transformer/splitter/markdown"
 	"github.com/cloudwego/eino-ext/components/embedding/openai"
 	"github.com/cloudwego/eino/components/document"
+	docparser "github.com/cloudwego/eino/components/document/parser"
 )
 
 // DocumentCollection 是所有知识库文档共用的 Chroma collection。
@@ -37,8 +38,20 @@ func NewFileService() (*FileService, error) {
 		return nil, fmt.Errorf("配置未加载")
 	}
 
+	extParser, err := docparser.NewExtParser(ctx, &docparser.ExtParserConfig{
+		Parsers: map[string]docparser.Parser{
+			".pdf": pdfTextParser{},
+			".PDF": pdfTextParser{},
+		},
+		FallbackParser: docparser.TextParser{},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("创建文档解析器失败: %w", err)
+	}
+
 	loader, err := file.NewFileLoader(ctx, &file.FileLoaderConfig{
 		UseNameAsID: true,
+		Parser:      extParser,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("创建文件加载器失败: %w", err)
@@ -112,17 +125,23 @@ func (s *FileService) ProcessFile(ctx context.Context, file multipart.File, file
 	}
 
 	// 4. 准备数据（生成唯一 ID，并写入来源文件名）
-	ids := make([]string, len(chunks))
-	contents := make([]string, len(chunks))
-	metadatas := make([]map[string]any, len(chunks))
+	var ids []string
+	var contents []string
+	var metadatas []map[string]any
 	timestamp := time.Now().UnixMilli()
 	for i, chunk := range chunks {
-		ids[i] = fmt.Sprintf("%s_%d_%d", chunk.ID, timestamp, i)
-		contents[i] = chunk.Content
-		metadatas[i] = map[string]any{
+		if strings.TrimSpace(chunk.Content) == "" {
+			continue
+		}
+		ids = append(ids, fmt.Sprintf("%s_%d_%d", chunk.ID, timestamp, i))
+		contents = append(contents, chunk.Content)
+		metadatas = append(metadatas, map[string]any{
 			"source": filename,
 			"chunk":  i,
-		}
+		})
+	}
+	if len(contents) == 0 {
+		return fmt.Errorf("文档未提取到可向量化内容")
 	}
 
 	// 5. 向量化

@@ -233,6 +233,8 @@ sandbox:
 | `PATCH` | `/api/conversation/:id` | 修改会话名称（`{"title":"..."}`，1–100 字符） |
 | `DELETE` | `/api/conversation/:id` | 删除指定会话 |
 
+知识库上传支持 `.txt`、`.md`、`.json` 和文本型 `.pdf`。PDF 使用纯 Go 提取文本并按 3000 字符切块；扫描件、加密 PDF 或无法提取文本的文件会返回明确错误，需要先做 OCR 或转换。
+
 ### 系统信息
 
 | 方法 | 路径 | 说明 |

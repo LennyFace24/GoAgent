@@ -12,6 +12,7 @@ require (
 	github.com/gin-contrib/sessions v1.1.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/google/uuid v1.6.0
+	github.com/ledongthuc/pdf v0.0.0-20260907135840-6c8c28e0e8a0
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/pkoukk/tiktoken-go v0.1.8
 	github.com/shirou/gopsutil/v4 v4.26.4
