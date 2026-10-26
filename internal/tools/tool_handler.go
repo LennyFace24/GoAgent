@@ -87,7 +87,11 @@ func NewToolHandler(fileSearcher extratool.FileSearcher, collector metrics.Colle
 		return nil, fmt.Errorf("创建 context_status 工具失败: %w", err)
 	}
 
-	sandBoxTool, err := sandboxtool.NewSandBoxTool(cfg.Sandbox.Endpoint)
+	sandboxEndpoint := ""
+	if cfg != nil {
+		sandboxEndpoint = cfg.Sandbox.Endpoint
+	}
+	sandBoxTool, err := sandboxtool.NewSandBoxTool(sandboxEndpoint, workspaceRoot)
 	if err != nil {
 		return nil, fmt.Errorf("创建 sandbox_tool 工具失败: %w", err)
 	}

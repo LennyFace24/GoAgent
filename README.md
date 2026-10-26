@@ -195,8 +195,10 @@ workspace:
   root: /path/to/workspace
 
 sandbox:
-  endpoint: http://localhost:8081
+  endpoint: http://localhost:9090
 ```
+
+`sandbox.endpoint` 只用于 `sandbox_tool` 的 `remote` 模式；`local` 模式会在 `workspace.root` 所在的 Git 仓库中创建独立 worktree，不依赖该端点。`cmd/sandbox-server` 默认监听 `9090`。
 
 对话模型使用独立的 `model.json`（参见 `model.example.json`），不使用 YAML 的 `llm` 段。`default` 指向 `models` 中一个条目的 `id`；`context_window`、`max_completion_tokens` 和 `safety_margin_tokens` 也放在对应模型条目中。`embedding` 则仍保留在应用 YAML 中，供知识库向量化使用。
 

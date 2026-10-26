@@ -48,7 +48,7 @@ GoAgent/
 │   │   ├── context_tool/          # compact（全局触发器）/ context_status / token 估算
 │   │   ├── basic_tool/            # bash（安全校验）/ read/write/edit 文件
 │   │   ├── extra_tool/            # health_check / knowledge_search / subproxy / todo
-│   │   └── sandbox_tool/          # 远程容器沙箱
+│   │   └── sandbox_tool/          # 本地 git worktree / 远程容器沙箱
 │   ├── permission/                # 规则匹配 + bash AST 只读分析 + pending 决策
 │   ├── task/                      # 任务工具（.tasks/ JSON 持久化）
 │   ├── config/                    # config.yaml 加载

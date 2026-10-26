@@ -3,67 +3,187 @@ package sandboxtool
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/LennyFace24/MiniAgent/internal/sandbox"
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
 )
 
-// 存储每个会话的沙箱实例，key 为 sessionID，value 为 *sandbox.Sandbox
-var sandboxes sync.Map
-
 type SandBoxToolInput struct {
-	Cmd         string `json:"cmd" description:"要在沙箱中执行的命令" required:"true"`
-	Operation   string `json:"operation" description:"操作类型，可选值为 create、execute 或 destroy" required:"true"`
-	ContainerID string `json:"container_id" description:"要操作的容器ID，仅在 execute 和 destroy 操作中需要" required:"false"`
+	Mode        string `json:"mode" description:"create 时必填：local 使用当前仓库的 git worktree；remote 使用配置的远程沙箱服务" required:"false"`
+	Operation   string `json:"operation" description:"操作类型：create、execute 或 destroy" required:"true"`
+	Cmd         string `json:"cmd" description:"execute 时要执行的命令" required:"false"`
+	SandboxID   string `json:"sandbox_id" description:"create 返回的沙箱 ID，execute/destroy 时使用" required:"false"`
+	ContainerID string `json:"container_id" description:"兼容旧字段，等价于 sandbox_id" required:"false"`
+	Timeout     int    `json:"timeout" description:"本地命令超时秒数，默认 30，最大 120" required:"false"`
 }
 
-func NewSandBoxTool(endpoint string) (tool.InvokableTool, error) {
+type sandboxEntry struct {
+	mode   string
+	remote *sandbox.SandBox
+	local  *sandbox.LocalWorktree
+}
+
+type sandboxManager struct {
+	endpoint      string
+	workspaceRoot string
+
+	mu      sync.Mutex
+	entries map[string]*sandboxEntry
+}
+
+func NewSandBoxTool(endpoint, workspaceRoot string) (tool.InvokableTool, error) {
+	m := &sandboxManager{
+		endpoint:      strings.TrimSpace(endpoint),
+		workspaceRoot: workspaceRoot,
+		entries:       make(map[string]*sandboxEntry),
+	}
 	return utils.InferTool(
 		"sandbox_tool",
-		"用于创建和管理沙箱容器，支持创建、执行命令和销毁容器。",
-		func(ctx context.Context, input SandBoxToolInput) (string, error) {
-			switch input.Operation {
-			case "create":
-				temp_sandbox := sandbox.CreateContainer(endpoint)
-				if temp_sandbox == nil {
-					return "", fmt.Errorf("创建沙箱容器失败")
-				}
-				sandboxes.Store(temp_sandbox.ContainerID, temp_sandbox)
-				return "容器创建完成,id是:" + temp_sandbox.ContainerID, nil
-			case "execute":
-				if input.ContainerID == "" {
-					return "", fmt.Errorf("沙箱容器未创建或已销毁")
-				}
-				tmp, ok := sandboxes.Load(input.ContainerID)
-				if !ok {
-					return "", fmt.Errorf("沙箱容器未创建或已销毁")
-				}
-				response := tmp.(*sandbox.SandBox).Execute(input.Cmd)
-				if response.Error != "" {
-					return "", fmt.Errorf("执行命令失败: %s", response.Error)
-				}
-
-				fmt.Printf("在容器%s中执行命令: %s\n", input.ContainerID, input.Cmd)
-				return response.Output, nil
-			case "destroy":
-				if input.ContainerID == "" {
-					return "", fmt.Errorf("沙箱容器未创建或已销毁")
-				}
-				tmp, ok := sandboxes.Load(input.ContainerID)
-				if !ok {
-					return "", fmt.Errorf("沙箱容器未创建或已销毁")
-				}
-				err := tmp.(*sandbox.SandBox).Destroy()
-				if err != nil {
-					return "", fmt.Errorf("销毁容器失败: %v", err)
-				}
-				fmt.Printf("容器%s已销毁\n", input.ContainerID)
-				return "容器已销毁", nil
-			default:
-				return "", fmt.Errorf("未知操作类型: %s", input.Operation)
-			}
-		},
+		"创建和管理隔离沙箱。根据用户需求选择 mode：local 使用当前 Git 仓库的 git worktree（适合本地改代码、跑测试）；remote 使用配置中的远程沙箱服务（适合容器隔离）。create 必须指定 mode。",
+		m.handle,
 	)
+}
+
+func (m *sandboxManager) handle(ctx context.Context, input SandBoxToolInput) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(input.Operation)) {
+	case "create":
+		return m.create(input)
+	case "execute":
+		return m.execute(ctx, input)
+	case "destroy":
+		return m.destroy(input)
+	default:
+		return "", fmt.Errorf("未知操作类型 %q，可选 create、execute、destroy", input.Operation)
+	}
+}
+
+func (m *sandboxManager) create(input SandBoxToolInput) (string, error) {
+	mode := normalizeMode(input.Mode)
+	switch mode {
+	case "local":
+		worktree, err := sandbox.CreateLocalWorktree(m.workspaceRoot)
+		if err != nil {
+			return "", err
+		}
+		m.mu.Lock()
+		m.entries[worktree.ID] = &sandboxEntry{mode: "local", local: worktree}
+		m.mu.Unlock()
+		return fmt.Sprintf(
+			"本地 worktree 创建完成\nsandbox_id=%s\npath=%s\nbranch=%s\n注意：基于当前 HEAD 创建，未提交的工作区修改不会带入。",
+			worktree.ID, worktree.Path, worktree.Branch,
+		), nil
+
+	case "remote":
+		if m.endpoint == "" {
+			return "", fmt.Errorf("remote 沙箱未配置 sandbox.endpoint")
+		}
+		remote := sandbox.CreateContainer(m.endpoint)
+		if remote == nil {
+			return "", fmt.Errorf("创建远程沙箱容器失败")
+		}
+		m.mu.Lock()
+		m.entries[remote.ContainerID] = &sandboxEntry{mode: "remote", remote: remote}
+		m.mu.Unlock()
+		return "远程沙箱创建完成\nsandbox_id=" + remote.ContainerID, nil
+
+	default:
+		return "", fmt.Errorf("create 必须指定 mode=local 或 mode=remote")
+	}
+}
+
+func (m *sandboxManager) execute(ctx context.Context, input SandBoxToolInput) (string, error) {
+	id := sandboxID(input)
+	if id == "" {
+		return "", fmt.Errorf("execute 需要 sandbox_id")
+	}
+	entry, ok := m.lookup(id)
+	if !ok {
+		return "", fmt.Errorf("沙箱 %s 不存在或已销毁", id)
+	}
+	if strings.TrimSpace(input.Cmd) == "" {
+		return "", fmt.Errorf("execute 需要 cmd")
+	}
+
+	if entry.mode == "local" {
+		timeout := time.Duration(input.Timeout) * time.Second
+		output, err := entry.local.Execute(ctx, input.Cmd, timeout)
+		if err != nil {
+			if output == "" {
+				return "", fmt.Errorf("命令执行失败: %w", err)
+			}
+			return fmt.Sprintf("%s\n[执行失败: %v]", output, err), nil
+		}
+		if output == "" {
+			return "(命令执行成功，无输出)", nil
+		}
+		return output, nil
+	}
+
+	response := entry.remote.Execute(input.Cmd)
+	if response.Error != "" {
+		return "", fmt.Errorf("执行命令失败: %s", response.Error)
+	}
+	if response.Output == "" {
+		return "(命令执行成功，无输出)", nil
+	}
+	return response.Output, nil
+}
+
+func (m *sandboxManager) destroy(input SandBoxToolInput) (string, error) {
+	id := sandboxID(input)
+	if id == "" {
+		return "", fmt.Errorf("destroy 需要 sandbox_id")
+	}
+	entry, ok := m.lookup(id)
+	if !ok {
+		return "", fmt.Errorf("沙箱 %s 不存在或已销毁", id)
+	}
+
+	if entry.mode == "local" {
+		if err := entry.local.Destroy(); err != nil {
+			return "", err
+		}
+		m.mu.Lock()
+		delete(m.entries, id)
+		m.mu.Unlock()
+		return fmt.Sprintf("worktree 已移除；分支 %s 保留，可检查或合并", entry.local.Branch), nil
+	}
+
+	if err := entry.remote.Destroy(); err != nil {
+		return "", fmt.Errorf("销毁容器失败: %v", err)
+	}
+	m.mu.Lock()
+	delete(m.entries, id)
+	m.mu.Unlock()
+	return "容器已销毁", nil
+}
+
+func (m *sandboxManager) lookup(id string) (*sandboxEntry, bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	entry, ok := m.entries[id]
+	return entry, ok
+}
+
+func sandboxID(input SandBoxToolInput) string {
+	id := strings.TrimSpace(input.SandboxID)
+	if id == "" {
+		id = strings.TrimSpace(input.ContainerID)
+	}
+	return id
+}
+
+func normalizeMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "local", "worktree", "git":
+		return "local"
+	case "remote", "docker", "container":
+		return "remote"
+	default:
+		return ""
+	}
 }
