@@ -246,11 +246,7 @@ func TestLoadHistoryAppliesCompactionAndKeepsLaterMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	kept := []*schema.Message{
-		schema.UserMessage("recent-user"),
-		schema.AssistantMessage("recent-reply", nil),
-	}
-	if err := s.SaveCompaction(sessionID, convID, "summary-marker", "3", kept); err != nil {
+	if err := s.SaveCompaction(sessionID, convID, "summary-marker", "3"); err != nil {
 		t.Fatalf("SaveCompaction: %v", err)
 	}
 
@@ -266,13 +262,19 @@ func TestLoadHistoryAppliesCompactionAndKeepsLaterMessages(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstLine, _, _ := strings.Cut(string(raw), "\n")
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	if len(lines) != 5 {
+		t.Fatalf("append-only history has %d lines, want 5", len(lines))
+	}
+	if !strings.Contains(lines[0], `"old-user"`) {
+		t.Fatalf("old message was removed from history: %s", lines[0])
+	}
 	var record struct {
 		Role        string `json:"role"`
 		Summary     string `json:"summary"`
 		FirstKeptID string `json:"first_kept_id"`
 	}
-	if err := json.Unmarshal([]byte(firstLine), &record); err != nil {
+	if err := json.Unmarshal([]byte(lines[4]), &record); err != nil {
 		t.Fatal(err)
 	}
 	if record.Role != "compaction" || record.Summary != "summary-marker" || record.FirstKeptID != "3" {
@@ -289,5 +291,35 @@ func TestLoadHistoryAppliesCompactionAndKeepsLaterMessages(t *testing.T) {
 	}
 	if len(msgs) != 4 || msgs[3].Content != "after-compaction" {
 		t.Fatalf("messages after compaction were lost: %v", msgs)
+	}
+}
+
+func TestLoadHistorySupportsLegacyCompactionAtFileStart(t *testing.T) {
+	s := newTestStore(t)
+	const sessionID = "sess"
+	meta, err := s.CreateConversation(sessionID, "legacy-compact")
+	if err != nil {
+		t.Fatal(err)
+	}
+	convID := meta.ID
+	path := s.filePath(sessionID, convID)
+	if err := os.MkdirAll(s.sessionDir(sessionID), 0755); err != nil {
+		t.Fatal(err)
+	}
+	content := strings.Join([]string{
+		`{"role":"compaction","summary":"legacy-summary","first_kept_id":"2"}`,
+		`{"id":"1","role":"user","content":"kept-message-1"}`,
+		`{"id":"2","role":"user","content":"kept-message-2"}`,
+	}, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	msgs, err := s.LoadHistory(sessionID, convID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(msgs) != 3 || msgs[0].Content != "legacy-summary" || msgs[1].Content != "kept-message-1" || msgs[2].Content != "kept-message-2" {
+		t.Fatalf("legacy compaction was not loaded: %v", msgs)
 	}
 }

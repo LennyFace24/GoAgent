@@ -114,7 +114,7 @@ func (s *AgentService) Stream(ctx context.Context,
 		History:        history,
 		CtxState:       state,
 		PersistCompaction: func(result *contexttool.CompactionResult) error {
-			return s.store.SaveCompaction(sessionID, conversationID, result.Summary, result.FirstKeptID, result.KeptMessages)
+			return s.store.SaveCompaction(sessionID, conversationID, result.Summary, result.FirstKeptID)
 		},
 	}
 	if err := pl.Run(ctx, mc); err != nil {

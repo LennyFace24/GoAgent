@@ -149,7 +149,8 @@ func (s *ConversationStore) ListConversations(sessionID string) ([]*Conversation
 }
 
 // LoadHistory 加载指定对话的历史消息。
-// 若存在 compaction 记录，只返回最新摘要及其之后的原始消息。
+// 文件保持 append-only；最新 compaction 之前的消息保留在磁盘，
+// 但只返回摘要、first_kept_id 开始的消息，以及 compaction 之后的新消息。
 func (s *ConversationStore) LoadHistory(sessionID, conversationID string) ([]*schema.Message, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -163,7 +164,13 @@ func (s *ConversationStore) LoadHistory(sessionID, conversationID string) ([]*sc
 	}
 	defer f.Close()
 
-	var msgs []*schema.Message
+	type historyEntry struct {
+		id  string
+		msg *schema.Message
+	}
+	var entries []historyEntry
+	var summary, firstKeptID string
+	latestCompactionAt := -1
 	var messageIndex uint64
 	scanner := bufio.NewScanner(f)
 	// 工具输出可能远大于 Scanner 默认的 64KB 单行上限。
@@ -174,11 +181,9 @@ func (s *ConversationStore) LoadHistory(sessionID, conversationID string) ([]*sc
 			continue
 		}
 		if line.Role == compactionRole {
-			// append-only 文件里 compaction 之后的记录才是当前有效历史。
-			msgs = nil
-			if line.Summary != "" {
-				msgs = append(msgs, schema.UserMessage(line.Summary))
-			}
+			summary = line.Summary
+			firstKeptID = line.FirstKeptID
+			latestCompactionAt = len(entries)
 			continue
 		}
 		messageIndex++
@@ -195,10 +200,33 @@ func (s *ConversationStore) LoadHistory(sessionID, conversationID string) ([]*sc
 			msg.Extra = make(map[string]any, 1)
 		}
 		msg.Extra["history_id"] = id
-		msgs = append(msgs, msg)
+		entries = append(entries, historyEntry{id: id, msg: msg})
 	}
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("scan history: %w", err)
+	}
+
+	start := 0
+	if latestCompactionAt >= 0 {
+		start = latestCompactionAt
+		// 旧版本曾把 compaction 写在文件开头并重写文件，此时 first_kept_id
+		// 指向重写前被删除的消息，不能用于过滤；只认真正追加在消息之后的记录。
+		if latestCompactionAt > 0 {
+			for i := range entries {
+				if entries[i].id == firstKeptID {
+					start = i
+					break
+				}
+			}
+		}
+	}
+
+	msgs := make([]*schema.Message, 0, len(entries)-start+1)
+	if latestCompactionAt >= 0 && summary != "" {
+		msgs = append(msgs, schema.UserMessage(summary))
+	}
+	for i := start; i < len(entries); i++ {
+		msgs = append(msgs, entries[i].msg)
 	}
 	log.Printf("加载对话历史：会话 %s, 对话 %s, 消息数 %d", sessionID, conversationID, len(msgs))
 	return msgs, nil
@@ -308,55 +336,31 @@ func (s *ConversationStore) SaveMessages(sessionID, conversationID string, msgs 
 	return nil
 }
 
-// SaveCompaction 原子重写历史文件：写入最新摘要和仍在窗口内的原始消息。
-// 这样压缩结果会落盘，文件也不会随对话无限增长。
-func (s *ConversationStore) SaveCompaction(sessionID, conversationID, summary, firstKeptID string, kept []*schema.Message) error {
+// SaveCompaction 追加一条压缩记录，不删除旧消息、不重写历史文件。
+// 后续加载通过 first_kept_id 截断发送给模型的消息窗口。
+func (s *ConversationStore) SaveCompaction(sessionID, conversationID, summary, firstKeptID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	dir := s.sessionDir(sessionID)
-	if err := os.MkdirAll(dir, 0755); err != nil {
+	if err := os.MkdirAll(s.sessionDir(sessionID), 0755); err != nil {
 		return fmt.Errorf("create session dir: %w", err)
 	}
 
-	tmp, err := os.CreateTemp(dir, conversationID+".compact-*")
+	path := s.filePath(sessionID, conversationID)
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
-		return fmt.Errorf("create compaction temp file: %w", err)
+		return fmt.Errorf("open history for compaction: %w", err)
 	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
+	defer f.Close()
 
-	encoder := json.NewEncoder(tmp)
-	if err := encoder.Encode(messageLine{
+	if err := json.NewEncoder(f).Encode(messageLine{
 		Role:        compactionRole,
 		Summary:     summary,
 		FirstKeptID: firstKeptID,
 	}); err != nil {
-		tmp.Close()
 		return fmt.Errorf("write compaction record: %w", err)
 	}
-	for i, msg := range kept {
-		line := encodeMessageLine(msg)
-		line.ID = strconv.Itoa(i + 1)
-		if err := encoder.Encode(line); err != nil {
-			tmp.Close()
-			return fmt.Errorf("write kept message: %w", err)
-		}
-	}
-	if err := tmp.Sync(); err != nil {
-		tmp.Close()
-		return fmt.Errorf("sync compaction file: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("close compaction file: %w", err)
-	}
-
-	path := s.filePath(sessionID, conversationID)
-	if err := os.Rename(tmpPath, path); err != nil {
-		return fmt.Errorf("replace history with compaction: %w", err)
-	}
-	s.sequences[path] = uint64(len(kept) + 1)
-	log.Printf("对话 %s/%s 已压缩：保留 %d 条原始消息", sessionID, conversationID, len(kept))
+	log.Printf("对话 %s/%s 已追加压缩记录：保留窗口从 %s 开始", sessionID, conversationID, firstKeptID)
 	return nil
 }
 

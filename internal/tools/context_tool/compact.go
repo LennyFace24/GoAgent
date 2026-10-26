@@ -3,14 +3,10 @@ package contexttool
 import (
 	"context"
 	_ "embed"
-	"encoding/json"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
-	"time"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/components/tool"
@@ -24,7 +20,6 @@ var compactRule string
 const (
 	KeepRecentTurns        = 6
 	KeepRecentMicroCompact = 6
-	TranscriptDir          = "data/transcripts"
 
 	// HistoryIDExtraKey 由 store.LoadHistory 写入每条历史消息的稳定 ID。
 	HistoryIDExtraKey = "history_id"
@@ -32,9 +27,8 @@ const (
 
 // CompactionResult 描述一次完整压缩的落盘信息。
 type CompactionResult struct {
-	Summary      string
-	FirstKeptID  string
-	KeptMessages []*schema.Message
+	Summary     string
+	FirstKeptID string
 }
 
 // ---------- compact 工具定义 ----------
@@ -170,33 +164,33 @@ func CompactFunc(ctx context.Context, messages []*schema.Message, chatModel mode
 		log.Printf("CompactFunc: 总结失败，跳过压缩: %v", err)
 		return messages, nil
 	}
-	persistTranscript(messages, sessionID, conversationID)
 
 	result := make([]*schema.Message, 0, len(recentMessages)+2)
 	result = append(result, systemMsg, schema.UserMessage(summary))
 	result = append(result, recentMessages...)
 
-	// 只落盘带原始 ID 的历史消息；当前轮新消息由 handler 统一保存，避免重复。
-	kept := make([]*schema.Message, 0, len(recentMessages))
+	// 找到保留窗口的第一条原始消息；当前轮新消息由 handler 统一保存。
+	firstKeptID := ""
+	keptCount := 0
 	for _, msg := range recentMessages {
-		if _, ok := msg.Extra[HistoryIDExtraKey]; ok {
-			kept = append(kept, msg)
+		id, ok := msg.Extra[HistoryIDExtraKey].(string)
+		if !ok || id == "" {
+			continue
+		}
+		keptCount++
+		if firstKeptID == "" {
+			firstKeptID = id
 		}
 	}
-	firstKeptID := ""
-	if len(kept) > 0 {
-		firstKeptID, _ = kept[0].Extra[HistoryIDExtraKey].(string)
-	}
-	if len(kept) == 0 {
+	if firstKeptID == "" {
 		// 没有可识别的原始消息（例如测试构造的内存历史），只做本次内存压缩。
 		return result, nil
 	}
 
-	log.Printf("CompactFunc: 压缩完成，消息数 %d -> %d，保留原始消息 %d", len(messages), len(result), len(kept))
+	log.Printf("CompactFunc: 压缩完成，消息数 %d -> %d，保留原始消息 %d", len(messages), len(result), keptCount)
 	return result, &CompactionResult{
-		Summary:      summary,
-		FirstKeptID:  firstKeptID,
-		KeptMessages: kept,
+		Summary:     summary,
+		FirstKeptID: firstKeptID,
 	}
 }
 
@@ -238,45 +232,6 @@ func summarizeOldMessages(ctx context.Context, messages []*schema.Message, chatM
 		return "", err
 	}
 	return resp.Content, nil
-}
-
-// 持久化压缩前的对话记录，便于后续分析和调试
-func persistTranscript(messages []*schema.Message, sessionID, conversationID string) {
-	dir := filepath.Join(TranscriptDir, sessionID)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		log.Printf("persistTranscript: 创建目录失败: %v", err)
-		return
-	}
-
-	filename := fmt.Sprintf("%s_%s_%s.jsonl", conversationID, time.Now().Format("20060102_150405"), "pre_compact")
-	path := filepath.Join(dir, filename)
-
-	f, err := os.Create(path)
-	if err != nil {
-		log.Printf("persistTranscript: 创建文件失败: %v", err)
-		return
-	}
-	defer f.Close()
-
-	for _, m := range messages {
-		line := map[string]any{
-			"role":    m.Role,
-			"content": m.Content,
-		}
-		if len(m.ToolCalls) > 0 {
-			line["tool_calls"] = m.ToolCalls
-		}
-		if m.ToolCallID != "" {
-			line["tool_call_id"] = m.ToolCallID
-		}
-		if m.ToolName != "" {
-			line["tool_name"] = m.ToolName
-		}
-		data, _ := json.Marshal(line)
-		f.Write(data)
-		f.WriteString("\n")
-	}
-	log.Printf("persistTranscript: 转录已保存到 %s", path)
 }
 
 func truncate(s string, maxLen int) string {

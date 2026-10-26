@@ -273,6 +273,7 @@ curl -X POST http://localhost:8080/api/search \
 ## 数据与持久化
 
 - 会话数据：`data/conversations`
+- 会话 JSONL 保持 append-only；完整压缩只追加 `compaction` 记录，加载时按 `first_kept_id` 截断模型上下文，旧消息仍保留在文件中。
 - Docker 会话 volume：`goagent-data`
 - Docker 向量数据 volume：`chroma-data`
 - 本地运行时请确保进程对工作区和数据目录具有必要的读写权限。
